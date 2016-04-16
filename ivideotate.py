@@ -3,6 +3,7 @@ import cv2
 import kivy
 kivy.require('1.9.1')
 from kivy.app import App
+from kivy.graphics import Color
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.anchorlayout import AnchorLayout
@@ -21,12 +22,15 @@ from videoeventdispatcher import VideoEventDispatcher
 from videoformats import formats
 from constants import *
 
+
+class AnnotationPanelWidget(BoxLayout):
+	def __init__(self, **kwargs):
+		super(AnnotationPanelWidget, self).__init__(**kwargs)
+		self.orientation = 'vertical'
+
 class VideoWidget(BoxLayout):
 	def __init__(self, **kwargs):
 		super(VideoWidget, self).__init__(**kwargs)
-
-		# Frame count
-		#self.numFrames = 0
 
 		self.videoEventDispatcher = VideoEventDispatcher()
 		self.videoEventDispatcher.bind(on_video_load=self.handleOnVideoLoad)
@@ -39,12 +43,29 @@ class VideoWidget(BoxLayout):
 
 		self.add_widget(self.frameWidget)
 
+		self.slider = Slider(min=0, max=100, value=0, size_hint=(1, None),
+			size=(100, 50))
+		self.slider.disabled = True
+		self.slider.bind(on_touch_down=self.handleSliderPressed)
+		self.slider.bind(on_touch_move=self.handleSliderDragged)
+		self.slider.bind(on_touch_up=self.handleSliderReleased)
+		self._videoPausedBySliderTouch=False
+		self.add_widget(self.slider)
+
 		self.controlWidget = ControlWidget(self.videoEventDispatcher)
-		self.controlWidget.size_hint = [1, 0.1]
+		self.controlWidget.size_hint = (1, 0.1)
 		self.add_widget(self.controlWidget)
 
-		# Clocks
-		Clock.schedule_interval(self.updateFrameControl, 0.03)
+		# Schedule Clocks
+		self.scheduleClocks()
+
+	def scheduleClocks(self):
+		Clock.schedule_interval(self.scheduleUpdateFrameControl, 0.03)
+		Clock.schedule_interval(self.scheduleUpdateSlider, 0.03)
+
+	def unscheduleClocks(self):
+		Clock.unschedule(self.scheduleUpdateFrameControl)
+		Clock.unschedule(self.scheduleUpdateSlider)
 
 	def handleOnVideoLoad(self, obj, *args):
 		selectedFile = args[0]
@@ -55,12 +76,32 @@ class VideoWidget(BoxLayout):
 		self.frameWidget.source = selectedFile
 		self.enablePlayButton()
 		self.enableFrameControl()
+		self.enableSlider()
 
 	def handleOnPlay(self, obj, *args):
 		self.frameWidget.state = 'play'
 
 	def handleOnPause(self, obj, *args):
 		self.frameWidget.state = 'pause'
+
+	def handleSliderPressed(self, obj, *args):
+		# Pause the video
+		if self.frameWidget.state == 'play':
+			self.frameWidget.state = 'pause'
+			self._videoPausedBySliderTouch = True
+		self.unscheduleClocks()
+
+	def handleSliderDragged(self, obj, *args):
+		self.seekToSliderPosition()
+		self.updateFrameControl()
+
+	def handleSliderReleased(self, obj, *args):
+		# Resume the video
+		#self.seekToSliderPosition()
+		if self._videoPausedBySliderTouch:
+			self.frameWidget.state = 'play'
+			self._videoPausedBySliderTouch = False
+		self.scheduleClocks()
 
 	def enablePlayButton(self):
 		self.controlWidget.playPauseButton.disabled = False
@@ -69,12 +110,31 @@ class VideoWidget(BoxLayout):
 		self.controlWidget.frameControl.disabled = False
 		self.controlWidget.frameControl.text = '0'
 
-	def updateFrameControl(self, obj):
+	def enableSlider(self):
+		self.slider.disabled = False
+
+	def updateFrameControl(self):
 		if self.controlWidget.frameControl.disabled:
 			return
-		
 		val = str(self._positionToFrame(self.frameWidget.position))
 		self.controlWidget.frameControl.text = val
+
+	def scheduleUpdateFrameControl(self, obj):
+		if self.controlWidget.frameControl.disabled:
+			return
+		val = str(self._positionToFrame(self.frameWidget.position))
+		self.controlWidget.frameControl.text = val
+
+	def seekToSliderPosition(self):
+		normValue = self.slider.value_normalized
+		self.frameWidget.seek(normValue)
+
+	def scheduleUpdateSlider(self, obj):
+		if self.slider.disabled:
+			return
+		videoPosition = self.frameWidget.position
+		videoDuration = self.frameWidget.duration
+		self.slider.value_normalized = videoPosition / videoDuration
 
 	# Helper
 	def _positionToFrame(self, position):
@@ -143,7 +203,13 @@ class RootWidget(BoxLayout):
 	def __init__(self, **kwargs):
 		super(RootWidget, self).__init__(**kwargs)
 		self.videoWidget = VideoWidget()
+		self.videoWidget.size_hint = (0.7, 1)
+		self.annotationPanelWidget = AnnotationPanelWidget()
+		self.annotationPanelWidget.size_hint = (0.3, 1)
+		print(self.annotationPanelWidget.canvas)
+		self.annotationPanelWidget.canvas.add(Color(1, 1, 1))
 		self.add_widget(self.videoWidget)
+		self.add_widget(self.annotationPanelWidget)
 
 class IVideotate(App):
 
