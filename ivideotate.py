@@ -2,8 +2,11 @@ from functools import partial
 import cv2
 import kivy
 kivy.require('1.9.1')
+from kivy.config import Config
+from kivy.core.window import Window
 from kivy.app import App
 from kivy.graphics import Color, Ellipse
+from kivy.graphics.vertex_instructions import Line, Rectangle
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.anchorlayout import AnchorLayout
@@ -66,8 +69,8 @@ class AnnotationPanelWidget(ScrollView):
 
 		self.add_widget(self.layout)
 
-		for i in range(50):
-			self.addAnnotationItem('dog')
+		#for i in range(50):
+		#	self.addAnnotationItem('dog')
 		
 
 	def addAnnotationItem(self, category):
@@ -98,9 +101,10 @@ class VideoWidget(BoxLayout):
 		self.videoEventDispatcher.bind(on_pause=self.handleOnPause)
 
 		self.orientation = 'vertical'
-		self.frameWidget = Video(source=CANVAS_IMAGE_PATH)
+		CANVAS_IMAGE_PATH = PROJECT_DIR + 'canvas.jpg'
+		self.videoCanvasWidget = VideoCanvasWidget()
 
-		self.add_widget(self.frameWidget)
+		self.add_widget(self.videoCanvasWidget)
 
 		self.slider = Slider(min=0, max=100, value=0, size_hint=(1, None),
 			size=(100, 50))
@@ -108,6 +112,9 @@ class VideoWidget(BoxLayout):
 		self.slider.bind(on_touch_down=self.handleSliderPressed)
 		self.slider.bind(on_touch_move=self.handleSliderDragged)
 		self.slider.bind(on_touch_up=self.handleSliderReleased)
+
+		#self.slider.bind(value=self.handleSliderDragged)
+
 		self._videoPausedBySliderTouch=False
 		self.add_widget(self.slider)
 
@@ -121,6 +128,7 @@ class VideoWidget(BoxLayout):
 	def scheduleClocks(self):
 		Clock.schedule_interval(self.scheduleUpdateFrameControl, 0.03)
 		Clock.schedule_interval(self.scheduleUpdateSlider, 0.03)
+		Clock.schedule_interval(self.scheduleUpdateAnnotationCanvas, 0.03)
 
 	def unscheduleClocks(self):
 		Clock.unschedule(self.scheduleUpdateFrameControl)
@@ -132,33 +140,35 @@ class VideoWidget(BoxLayout):
 		#cap = cv2.VideoCapture(selectedFile)
 		#self.numFrames = int(cap.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
 
-		self.frameWidget.source = selectedFile
+		self.videoCanvasWidget.frameWidget.source = selectedFile
 		self.enablePlayButton()
 		self.enableFrameControl()
 		self.enableSlider()
 
 	def handleOnPlay(self, obj, *args):
-		self.frameWidget.state = 'play'
+		self.videoCanvasWidget.frameWidget.state = 'play'
 
 	def handleOnPause(self, obj, *args):
-		self.frameWidget.state = 'pause'
+		self.videoCanvasWidget.frameWidget.state = 'pause'
 
 	def handleSliderPressed(self, obj, *args):
 		# Pause the video
-		if self.frameWidget.state == 'play':
-			self.frameWidget.state = 'pause'
+		if self.videoCanvasWidget.frameWidget.state == 'play':
+			self.videoCanvasWidget.frameWidget.state = 'pause'
 			self._videoPausedBySliderTouch = True
 		self.unscheduleClocks()
 
 	def handleSliderDragged(self, obj, *args):
+		print("Handling slider dragged")
 		self.seekToSliderPosition()
 		self.updateFrameControl()
+		self.updateAnnotationCanvas()
 
 	def handleSliderReleased(self, obj, *args):
 		# Resume the video
 		#self.seekToSliderPosition()
 		if self._videoPausedBySliderTouch:
-			self.frameWidget.state = 'play'
+			self.videoCanvasWidget.frameWidget.state = 'play'
 			self._videoPausedBySliderTouch = False
 		self.scheduleClocks()
 
@@ -173,26 +183,36 @@ class VideoWidget(BoxLayout):
 		self.slider.disabled = False
 
 	def updateFrameControl(self):
+		print("Updating frame control")
 		if self.controlWidget.frameControl.disabled:
 			return
-		val = str(self._positionToFrame(self.frameWidget.position))
+		val = str(self._positionToFrame(self.videoCanvasWidget.frameWidget.position))
 		self.controlWidget.frameControl.text = val
 
 	def scheduleUpdateFrameControl(self, obj):
+		#print("Schedule updating frame control")
 		if self.controlWidget.frameControl.disabled:
 			return
-		val = str(self._positionToFrame(self.frameWidget.position))
+		val = str(self._positionToFrame(self.videoCanvasWidget.frameWidget.position))
 		self.controlWidget.frameControl.text = val
+
+	def updateAnnotationCanvas(self):
+		self.videoCanvasWidget.canvasWidget.curFrame = \
+		self._positionToFrame(self.videoCanvasWidget.frameWidget.position)
+
+	def scheduleUpdateAnnotationCanvas(self, obj):
+		self.videoCanvasWidget.canvasWidget.curFrame = \
+		self._positionToFrame(self.videoCanvasWidget.frameWidget.position)		
 
 	def seekToSliderPosition(self):
 		normValue = self.slider.value_normalized
-		self.frameWidget.seek(normValue)
+		self.videoCanvasWidget.frameWidget.seek(normValue)
 
 	def scheduleUpdateSlider(self, obj):
 		if self.slider.disabled:
 			return
-		videoPosition = self.frameWidget.position
-		videoDuration = self.frameWidget.duration
+		videoPosition = self.videoCanvasWidget.frameWidget.position
+		videoDuration = self.videoCanvasWidget.frameWidget.duration
 		self.slider.value_normalized = videoPosition / videoDuration
 
 	# Helper
@@ -233,7 +253,7 @@ class ControlWidget(BoxLayout):
 		self.add_widget(self.frameControl)
 		self.add_widget(self.loadVideoButton)
 
-		self.fileChooserPopup = Popup(title='Test popup',
+		self.fileChooserPopup = Popup(title='Select Video File',
 			content=FileChooserWindow(self.videoEventDispatcher),
 			size_hint=(None, None), size=(1000, 1000))
 
@@ -255,24 +275,61 @@ class ControlWidget(BoxLayout):
 			self.videoEventDispatcher.dispatchOnPlay(None)
 			self.playing = True
 
+class Touch:
+	def __init__(self, x, y):
+		self.x = x
+		self.y = y
 
 class AnnotationCanvasWidget(Widget):
 	def __init__(self, **kwargs):
 		super(AnnotationCanvasWidget, self).__init__(**kwargs)
+		self.lastTouch = Touch(-1, -1)
+		self.mouseDown = False
+
+		# Important: we must receive the current frame number from
+		# the videoWidget. This happens during
+		self.curFrame = 0
+
 	def on_touch_down(self, touch):
-		print("TOUCH DOWN!!!")
+		if touch.y < 200:
+			return
+		self.lastTouch = Touch(touch.x, touch.y)
+		self.mouseDown = True
+
+		print("current frame = " + str(self.curFrame))
+
+	def on_touch_move(self, touch):
+		if self.mouseDown is False:
+			return
+		self.redrawCanvas()
+
 		with self.canvas:
-			d = 30
-			Ellipse(pos=(touch.x-d/2, touch.y-d/2), size=(d,d))
+			self.drawRect(self.lastTouch, touch)
+
+	def on_touch_up(self, touch):
+
+		self.redrawCanvas()
+		point1 = Touch(self.lastTouch.x, self.lastTouch.y)
+		point2 = Touch(touch.x, touch.y)
+		self.mouseDown = False
 
 
-class VideoDrawingWidget(FloatLayout):
+	def drawRect(self, point1, point2):
+		Line(points=[point1.x, point1.y, point2.x, point1.y, point2.x, point2.y, point1.x, point2.y, point1.x, point1.y], width=4)
+
+	# TODO: This function will draw all existing ractangles (annotations)
+	# for the current frame
+	def redrawCanvas(self):
+		self.canvas.clear()
+
+class VideoCanvasWidget(FloatLayout):
 	def __init__(self, **kwargs):
-		super(VideoDrawingWidget, self).__init__(**kwargs)
+		super(VideoCanvasWidget, self).__init__(**kwargs)
 
-		self.videoWidget = VideoWidget()
+		self.frameWidget = Video(source=CANVAS_IMAGE_PATH)
 		self.canvasWidget = AnnotationCanvasWidget()
-		self.add_widget(self.videoWidget)
+		#self.canvasWidget.size = self.frameWidget.size
+		self.add_widget(self.frameWidget)
 		self.add_widget(self.canvasWidget)
 
 
@@ -281,7 +338,6 @@ class RootWidget(BoxLayout):
 		super(RootWidget, self).__init__(**kwargs)
 		self.videoWidget = VideoWidget()
 		self.videoWidget.size_hint = (0.7, 1)
-
 		self.annotationPanelWidget = AnnotationPanelWidget()
 		self.annotationPanelWidget.size_hint = (0.3, 1)
 		self.add_widget(self.videoWidget)
@@ -294,5 +350,8 @@ class IVideotate(App):
 		return parent
 
 if __name__ == '__main__':
+
+	Window.size = (800, 600)
+
 	IVideotate().run()
 
