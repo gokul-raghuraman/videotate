@@ -35,6 +35,7 @@ class FileChooserWindow(BoxLayout):
 		self.openButton.bind(on_release=self.handleOpenButtonClick)
 		self.buttonsLayout.add_widget(self.openButton)
 		self.cancelButton = Button(text='Cancel')
+		self.cancelButton.bind(on_release=self.handleCancelButtonclick)
 		self.buttonsLayout.add_widget(self.cancelButton)
 		self.add_widget(self.buttonsLayout)
 
@@ -47,6 +48,9 @@ class FileChooserWindow(BoxLayout):
 
 		# Valid video. Dispatch on_file_selected event 
 		self.videoEventDispatcher.dispatchOnFileSelected(selectedFile)
+
+	def handleCancelButtonclick(self, obj):
+		self.videoEventDispatcher.dispatchOnPopupCancelled()
 
 
 

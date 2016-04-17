@@ -1,4 +1,5 @@
 from functools import partial
+import math
 import cv2
 import kivy
 kivy.require('1.9.1')
@@ -27,6 +28,8 @@ from kivy.clock import Clock
 
 from filechooserwindow import FileChooserWindow
 from videoeventdispatcher import VideoEventDispatcher
+from annotationmanager import AnnotationManager
+from interpolator import Interpolator
 from videoformats import formats
 from constants import *
 
@@ -102,7 +105,7 @@ class VideoWidget(BoxLayout):
 
 		self.orientation = 'vertical'
 		CANVAS_IMAGE_PATH = PROJECT_DIR + 'canvas.jpg'
-		self.videoCanvasWidget = VideoCanvasWidget()
+		self.videoCanvasWidget = VideoCanvasWidget(self.videoEventDispatcher)
 
 		self.add_widget(self.videoCanvasWidget)
 
@@ -128,7 +131,7 @@ class VideoWidget(BoxLayout):
 	def scheduleClocks(self):
 		Clock.schedule_interval(self.scheduleUpdateFrameControl, 0.03)
 		Clock.schedule_interval(self.scheduleUpdateSlider, 0.03)
-		#Clock.schedule_interval(self.scheduleUpdateAnnotationCanvas, 0.03)
+		Clock.schedule_interval(self.scheduleUpdateAnnotationCanvas, 0.03)
 
 	def unscheduleClocks(self):
 		Clock.unschedule(self.scheduleUpdateFrameControl)
@@ -144,9 +147,11 @@ class VideoWidget(BoxLayout):
 
 	def handleOnPlay(self, obj, *args):
 		self.videoCanvasWidget.frameWidget.state = 'play'
+		self.scheduleClocks()
 
 	def handleOnPause(self, obj, *args):
 		self.videoCanvasWidget.frameWidget.state = 'pause'
+		self.unscheduleClocks()
 
 	def handleSliderPressed(self, obj, *args):
 		# Pause the video
@@ -163,8 +168,6 @@ class VideoWidget(BoxLayout):
 		self.seekToSliderPosition()
 		self.updateFrameControl()
 		self.updateAnnotationCanvas()
-
-		
 
 	def handleSliderReleased(self, obj, *args):
 		# Resume the video
@@ -185,7 +188,6 @@ class VideoWidget(BoxLayout):
 		self.slider.disabled = False
 
 	def updateFrameControl(self):
-		print("Updating frame control")
 		if self.controlWidget.frameControl.disabled:
 			return
 		val = str(self._positionToFrame(self.videoCanvasWidget.frameWidget.position))
@@ -201,10 +203,12 @@ class VideoWidget(BoxLayout):
 	def updateAnnotationCanvas(self):
 		self.videoCanvasWidget.canvasWidget.curFrame = \
 		self._positionToFrame(self.videoCanvasWidget.frameWidget.position)
+		self.videoCanvasWidget.canvasWidget.redrawCanvasAtFrame()
 
 	def scheduleUpdateAnnotationCanvas(self, obj):
 		self.videoCanvasWidget.canvasWidget.curFrame = \
 		self._positionToFrame(self.videoCanvasWidget.frameWidget.position)		
+		#self.videoCanvasWidget.canvasWidget.redrawCanvasAtFrame()
 
 	def seekToSliderPosition(self):
 		normValue = self.slider.value_normalized
@@ -234,6 +238,7 @@ class ControlWidget(BoxLayout):
 
 		self.videoEventDispatcher = videoEventDispatcher
 		self.videoEventDispatcher.bind(on_file_selected=self.handleOnFileSelected)
+		self.videoEventDispatcher.bind(on_popup_cancelled=self.handleOnPopupCancelled)
 
 		self.playPauseButton = Button(text='Play')
 		self.playPauseButton.size_hint = (None, None)
@@ -242,6 +247,7 @@ class ControlWidget(BoxLayout):
 		self.playPauseButton.bind(on_release=self.handlePlayPauseClicked)
 
 		self.frameControl = TextInput(text=' ')
+		self.frameControl.multiline = False
 		self.frameControl.size_hint = (None, None)
 		self.frameControl.size = (120, 60)
 		self.frameControl.disabled = True
@@ -267,6 +273,9 @@ class ControlWidget(BoxLayout):
 		selectedFile = args[0]
 		self.videoEventDispatcher.dispatchOnVideoLoad(selectedFile)
 
+	def handleOnPopupCancelled(self, obj, *args):
+		self.fileChooserPopup.dismiss()
+
 	def handlePlayPauseClicked(self, obj):
 		if self.playing:
 			self.playPauseButton.text = 'Play'
@@ -277,20 +286,39 @@ class ControlWidget(BoxLayout):
 			self.videoEventDispatcher.dispatchOnPlay(None)
 			self.playing = True
 
+# Helper
 class Touch:
 	def __init__(self, x, y):
 		self.x = x
 		self.y = y
 
 class AnnotationCanvasWidget(Widget):
-	def __init__(self, **kwargs):
+	def __init__(self, videoEventDispatcher, **kwargs):
 		super(AnnotationCanvasWidget, self).__init__(**kwargs)
+
+		self.videoEventDispatcher = videoEventDispatcher
+		self.videoEventDispatcher.bind(on_label_create=self.handleOnLabelCreate)
+
+		# Last touch point for anchoring current bounding box 
+		# during mouse drag
 		self.lastTouch = Touch(-1, -1)
 		self.mouseDown = False
+
+		# Active points for registering newly created bounding box
+		self.point1 = Touch(-1, -1)
+		self.point2 = Touch(-1, -1)
+
+		# Annotation Manager
+		self.annotationManager = AnnotationManager()
+
+		# Interpolator
+		self.interpolator = Interpolator(self.annotationManager)
+
 
 		# Important: we must receive the current frame number from
 		# the videoWidget. This happens during
 		self.curFrame = 0
+
 
 	def on_touch_down(self, touch):
 		# Don't consider if dragged over slider
@@ -299,22 +327,47 @@ class AnnotationCanvasWidget(Widget):
 		self.lastTouch = Touch(touch.x, touch.y)
 		self.mouseDown = True
 
-		print("current frame = " + str(self.curFrame))
-
 	def on_touch_move(self, touch):
 		if self.mouseDown is False:
 			return
-		self.redrawCanvas()
+		self.redrawCanvasAtFrame()
 
 		with self.canvas:
+			Color(1, 0, 0)
 			self.drawRect(self.lastTouch, touch)
 
 	def on_touch_up(self, touch):
-
-		self.redrawCanvas()
-		point1 = Touch(self.lastTouch.x, self.lastTouch.y)
-		point2 = Touch(touch.x, touch.y)
+		if self.mouseDown is False:
+			return
+		self.redrawCanvasAtFrame()
+		
+		self.point1 = Touch(self.lastTouch.x, self.lastTouch.y)
+		self.point2 = Touch(touch.x, touch.y)
 		self.mouseDown = False
+
+		# Don't add annotation if rectangle is very tiny
+		if math.sqrt(math.pow(self.point1.x - self.point2.x, 2) + 
+			math.pow(self.point1.y - self.point2.y, 2)) < 10:
+			return
+
+		self.labelerPopup = Popup(title='Enter Class Label',
+			content=AnnotationLabelPopup(self.videoEventDispatcher),
+			size_hint=(None, None), size=(500, 300))
+
+		self.labelerPopup.open()
+
+	def handleOnLabelCreate(self, obj, *args):
+		self.labelerPopup.dismiss()
+
+		if -1 in [self.point1.x, self.point1.y, self.point2.x, self.point2.y]:
+			print("Invalid bounding box!")
+			return
+		classLabel = args[0]
+
+		self.annotationManager.addAnnotationAtFrame(self.curFrame, 
+			self.point1, self.point2, classLabel)
+		self.point1 = Touch(-1, -1)
+		self.point2 = Touch(-1, -1)
 
 
 	def drawRect(self, point1, point2):
@@ -322,15 +375,46 @@ class AnnotationCanvasWidget(Widget):
 
 	# TODO: This function will draw all existing ractangles (annotations)
 	# for the current frame
-	def redrawCanvas(self):
+	def redrawCanvasAtFrame(self, *args):
 		self.canvas.clear()
+		print("redrawing")
+		# Get all annotations and interpolate as necessary
+
+
+class AnnotationLabelPopup(BoxLayout):
+	def __init__(self, videoEventDispatcher, **kwargs):
+		super(AnnotationLabelPopup, self).__init__(**kwargs)
+		self.videoEventDispatcher = videoEventDispatcher
+
+		self.orientation = 'vertical'
+		self.spacing = 10
+		self.padding = 10
+		self.labelInput = TextInput(text='')
+		self.labelInput.multiline = False
+		self.labelInput.size_hint = (1, None)
+		self.labelInput.size = (100, 60)
+		self.createButton = Button(text='Create')
+		self.createButton.size_hint = (None, None)
+		self.createButton.size = (100, 60)
+		self.createButton.bind(on_release=self.handleCreate)
+		
+		self.add_widget(self.labelInput)
+		self.add_widget(self.createButton)
+
+	def handleCreate(self, obj):
+		if not self.labelInput.text:
+			return
+
+		self.videoEventDispatcher.dispatchOnLabelCreate(self.labelInput.text)
 
 class VideoCanvasWidget(FloatLayout):
-	def __init__(self, **kwargs):
+	def __init__(self, videoEventDispatcher, **kwargs):
 		super(VideoCanvasWidget, self).__init__(**kwargs)
 
+		self.videoEventDispatcher = videoEventDispatcher
+
 		self.frameWidget = Video(source=CANVAS_IMAGE_PATH)
-		self.canvasWidget = AnnotationCanvasWidget()
+		self.canvasWidget = AnnotationCanvasWidget(self.videoEventDispatcher)
 		#self.canvasWidget.size = self.frameWidget.size
 		self.add_widget(self.frameWidget)
 		self.add_widget(self.canvasWidget)
@@ -354,7 +438,7 @@ class IVideotate(App):
 
 if __name__ == '__main__':
 
-	Window.size = (800, 600)
+	Window.size = (1000, 800)
 
 	IVideotate().run()
 

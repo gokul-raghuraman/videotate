@@ -20,6 +20,8 @@ class VideoEventDispatcher(EventDispatcher):
 		self.register_event_type('on_file_selected')
 		self.register_event_type('on_play')
 		self.register_event_type('on_pause')
+		self.register_event_type('on_label_create')
+		self.register_event_type('on_popup_cancelled')
 		super(VideoEventDispatcher, self).__init__(**kwargs)
 
 	def dispatchOnVideoLoad(self, value):
@@ -34,6 +36,12 @@ class VideoEventDispatcher(EventDispatcher):
 	def dispatchOnPause(self, value):
 		self.dispatch('on_pause', value)
 
+	def dispatchOnLabelCreate(self, value):
+		self.dispatch('on_label_create', value)
+
+	def dispatchOnPopupCancelled(self):
+		self.dispatch('on_popup_cancelled')
+
 	def on_video_load(self, *args):
 		print("Video has been loaded")
 
@@ -45,3 +53,9 @@ class VideoEventDispatcher(EventDispatcher):
 
 	def on_pause(self, *args):
 		print("Video Paused")
+
+	def on_label_create(self, *args):
+		print("Label Created")
+
+	def on_popup_cancelled(self, *args):
+		print("Popup Cancelled")
