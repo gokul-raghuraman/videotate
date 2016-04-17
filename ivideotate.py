@@ -128,7 +128,7 @@ class VideoWidget(BoxLayout):
 	def scheduleClocks(self):
 		Clock.schedule_interval(self.scheduleUpdateFrameControl, 0.03)
 		Clock.schedule_interval(self.scheduleUpdateSlider, 0.03)
-		Clock.schedule_interval(self.scheduleUpdateAnnotationCanvas, 0.03)
+		#Clock.schedule_interval(self.scheduleUpdateAnnotationCanvas, 0.03)
 
 	def unscheduleClocks(self):
 		Clock.unschedule(self.scheduleUpdateFrameControl)
@@ -136,9 +136,6 @@ class VideoWidget(BoxLayout):
 
 	def handleOnVideoLoad(self, obj, *args):
 		selectedFile = args[0]
-		# Compute frame count
-		#cap = cv2.VideoCapture(selectedFile)
-		#self.numFrames = int(cap.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
 
 		self.videoCanvasWidget.frameWidget.source = selectedFile
 		self.enablePlayButton()
@@ -159,10 +156,15 @@ class VideoWidget(BoxLayout):
 		self.unscheduleClocks()
 
 	def handleSliderDragged(self, obj, *args):
-		print("Handling slider dragged")
+		# Don't consider if mouse not over slider
+		pos = args[0].pos
+		if pos[1] > slider_y:
+			return
 		self.seekToSliderPosition()
 		self.updateFrameControl()
 		self.updateAnnotationCanvas()
+
+		
 
 	def handleSliderReleased(self, obj, *args):
 		# Resume the video
@@ -291,7 +293,8 @@ class AnnotationCanvasWidget(Widget):
 		self.curFrame = 0
 
 	def on_touch_down(self, touch):
-		if touch.y < 200:
+		# Don't consider if dragged over slider
+		if touch.y < slider_y:
 			return
 		self.lastTouch = Touch(touch.x, touch.y)
 		self.mouseDown = True
