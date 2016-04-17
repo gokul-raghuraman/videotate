@@ -22,6 +22,7 @@ class VideoEventDispatcher(EventDispatcher):
 		self.register_event_type('on_pause')
 		self.register_event_type('on_label_create')
 		self.register_event_type('on_popup_cancelled')
+		self.register_event_type('on_annotation_add')
 		super(VideoEventDispatcher, self).__init__(**kwargs)
 
 	def dispatchOnVideoLoad(self, value):
@@ -42,14 +43,17 @@ class VideoEventDispatcher(EventDispatcher):
 	def dispatchOnPopupCancelled(self):
 		self.dispatch('on_popup_cancelled')
 
+	def dispatchOnAnnotationAdd(self, value):
+		self.dispatch('on_annotation_add', value)
+
 	def on_video_load(self, *args):
-		print("Video has been loaded")
+		print("Video Loaded")
 
 	def on_file_selected(self, *args):
-		print("File has been selected")
+		print("File Selected")
 
 	def on_play(self, *args):
-		print("Video playing")
+		print("Video Playing")
 
 	def on_pause(self, *args):
 		print("Video Paused")
@@ -59,3 +63,6 @@ class VideoEventDispatcher(EventDispatcher):
 
 	def on_popup_cancelled(self, *args):
 		print("Popup Cancelled")
+
+	def on_annotation_add(self, *args):
+		print("Annotated Added")

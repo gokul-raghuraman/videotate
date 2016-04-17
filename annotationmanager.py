@@ -44,6 +44,7 @@ class AnnotationManager:
 		
 		# Get second level dict of {id : [Annotation(frame), ...]}
 		idFrameDict = self.annotationDict.get(classLabel)
+		annotation = None
 		if not idFrameDict:
 			annotation = Annotation(point1.x, point1.y, point2.x, point2.y, classLabel, 1)
 			idFrameDict = {1 : {frame : annotation}}
@@ -58,10 +59,9 @@ class AnnotationManager:
 			frameDict = {frame : annotation}
 			self.annotationDict[classLabel][newId] = frameDict
 
-		return
+		return annotation
 
 	def updateAnnotationAtFrame(self, annotation, frame, point1, point2):
-		print("Updating annotation : " + str(annotation.category) + " " + str(annotation.id) + " at frame " + str(frame))
 
 		# Find the annotation framedict (there should be one)
 		idFrameDict = self.annotationDict[annotation.category]

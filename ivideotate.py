@@ -42,14 +42,16 @@ class AnnotationItemWidget(BoxLayout):
 		self.spacing = 5
 		self.category = "<category>"
 		self.id = "<id>"
-		self.label = Label(text="%s %s" % (self.category, self.id))
+		self.label = Label(text="[b]%s %s[/b]" % (self.category, self.id))
 		self.label.size_hint = (None, 1)
-		self.label.size = (150, 100)
+		self.label.size = (250, 100)
 		self.add_widget(self.label)
 		self.deleteButton = Button(text="Delete")
 		self.deleteButton.size_hint = (None, 1)
 		self.deleteButton.size = (150, 100)
 		self.add_widget(self.deleteButton)
+
+		self.deleteButton.size_hint = (1, 1)
 
 	def setCategory(self, category):
 		self.category = category
@@ -62,10 +64,13 @@ class AnnotationItemWidget(BoxLayout):
 
 
 class AnnotationPanelWidget(ScrollView):
-	def __init__(self, **kwargs):
+	def __init__(self, videoEventDispatcher, **kwargs):
 		super(AnnotationPanelWidget, self).__init__(**kwargs)
 		self.do_scroll_x = False
 		self.effect_cls = DampedScrollEffect
+
+		self.videoEventDispatcher = videoEventDispatcher
+		self.videoEventDispatcher.bind(on_annotation_add=self.handleOnAnnotationAdd)
 
 		self.layout = GridLayout(cols=1, spacing=10, size_hint_y=None)
 		self.layout.bind(minimum_height=self.layout.setter('height'))
@@ -73,29 +78,24 @@ class AnnotationPanelWidget(ScrollView):
 		self.add_widget(self.layout)
 		
 
-	def addAnnotationItem(self, category):
+	def addAnnotationItem(self, annotation):
 		annotationItemWidget = AnnotationItemWidget()
-		annotationItemWidget.setCategory(category)
-
-		# Find an available ID
-		itemWidgetIdsForCategory = [itemWidget.id for itemWidget in self.layout.children 
-			if itemWidget.category == category]
-
-		newId = 1
-		if len(itemWidgetIdsForCategory) > 0:
-			while str(newId) in itemWidgetIdsForCategory:
-				newId += 1
-
-		annotationItemWidget.setId(str(newId))
+		annotationItemWidget.setCategory(annotation.category)
+		annotationItemWidget.setId(str(annotation.id))
 		annotationItemWidget.refreshLabel()
 		self.layout.add_widget(annotationItemWidget)
 		return annotationItemWidget
 
+	def handleOnAnnotationAdd(self, obj, *args):
+		addedAnnotation = args[0]
+		addedItemWidget = self.addAnnotationItem(addedAnnotation)
+
+
 class VideoWidget(BoxLayout):
-	def __init__(self, **kwargs):
+	def __init__(self, videoEventDispatcher, **kwargs):
 		super(VideoWidget, self).__init__(**kwargs)
 
-		self.videoEventDispatcher = VideoEventDispatcher()
+		self.videoEventDispatcher = videoEventDispatcher
 		self.videoEventDispatcher.bind(on_video_load=self.handleOnVideoLoad)
 		self.videoEventDispatcher.bind(on_play=self.handleOnPlay)
 		self.videoEventDispatcher.bind(on_pause=self.handleOnPause)
@@ -205,12 +205,7 @@ class VideoWidget(BoxLayout):
 	def scheduleUpdateAnnotationCanvas(self, obj):
 		self.videoCanvasWidget.canvasWidget.curFrame = \
 		self._positionToFrame(self.videoCanvasWidget.frameWidget.position)		
-		
-
-
-		# IMPORTANT...PUT BACK
-
-		#self.videoCanvasWidget.canvasWidget.redrawCanvasAtFrame()
+		self.videoCanvasWidget.canvasWidget.redrawCanvasAtFrame()
 
 	def seekToSliderPosition(self):
 		normValue = self.slider.value_normalized
@@ -379,9 +374,6 @@ class AnnotationCanvasWidget(Widget):
 					self.interactingAnnotation.y1+touch.y-self.lastTouch.y)
 			self.point2 = Touch(self.interactingAnnotation.x2+touch.x-self.lastTouch.x, 
 					self.interactingAnnotation.y2+touch.y-self.lastTouch.y)
-			
-			print("Updating annotation with new coordinates : " )
-			print(str(self.point1.x) + ", " + str(self.point1.y) + ", " + str(self.point2.x) + ", " + str(self.point2.y))
 			self.annotationManager.updateAnnotationAtFrame(self.interactingAnnotation, 
 				self.curFrame, self.point1, self.point2)
 			self.point1 = Touch(-1, -1)
@@ -390,12 +382,15 @@ class AnnotationCanvasWidget(Widget):
 			self.redrawCanvasAtFrame()
 
 		elif self.mode == MODE_CREATE:
-
 			self.point1 = Touch(self.lastTouch.x, self.lastTouch.y)
 			self.point2 = Touch(touch.x, touch.y)
 			self.mouseDown = False
 
-			# Don't add annotation if rectangle is very tiny
+			# Don't add annotation if released over slider
+			if touch.y < slider_y:
+				return
+
+			# Or if rectangle is very tiny
 			if math.sqrt(math.pow(self.point1.x - self.point2.x, 2) + 
 				math.pow(self.point1.y - self.point2.y, 2)) < 10:
 				return
@@ -420,11 +415,13 @@ class AnnotationCanvasWidget(Widget):
 			return
 		classLabel = args[0]
 
-		self.annotationManager.addAnnotationAtFrame(self.curFrame, 
+		addedAnnotation = self.annotationManager.addAnnotationAtFrame(self.curFrame, 
 			self.point1, self.point2, classLabel)
 		self.point1 = Touch(-1, -1)
 		self.point2 = Touch(-1, -1)
 		self.redrawCanvasAtFrame()
+
+		self.videoEventDispatcher.dispatchOnAnnotationAdd(addedAnnotation)
 
 
 	def drawRect(self, point1, point2):
@@ -435,8 +432,17 @@ class AnnotationCanvasWidget(Widget):
 		# Get all annotations and interpolate as necessary
 		annotationsForFrame = self.interpolator.getAnnotationsForFrame(self.curFrame)
 
+		# We want to exclude rendering the existing annotation when the
+		# user tries to move/resize it.
+		# Important: we can't directly reference the excludeAnnotation
+		# object for removal because getContainingAnnotation will 
+		# create a new object for in-between frames. So compare category
+		# and id for removal
 		if excludeAnnotation:
-			annotationsForFrame.remove(excludeAnnotation)
+			for annotation in annotationsForFrame:
+				if annotation.category == excludeAnnotation.category and annotation.id == excludeAnnotation.id:
+					annotationsForFrame.remove(annotation)
+					break
 
 		with self.canvas:
 			for annotation in annotationsForFrame:
@@ -481,7 +487,6 @@ class VideoCanvasWidget(FloatLayout):
 
 		self.frameWidget = Video(source=CANVAS_IMAGE_PATH)
 		self.canvasWidget = AnnotationCanvasWidget(self.videoEventDispatcher)
-		#self.canvasWidget.size = self.frameWidget.size
 		self.add_widget(self.frameWidget)
 		self.add_widget(self.canvasWidget)
 
@@ -489,9 +494,10 @@ class VideoCanvasWidget(FloatLayout):
 class RootWidget(BoxLayout):
 	def __init__(self, **kwargs):
 		super(RootWidget, self).__init__(**kwargs)
-		self.videoWidget = VideoWidget()
+		videoEventDispatcher = VideoEventDispatcher()
+		self.videoWidget = VideoWidget(videoEventDispatcher)
 		self.videoWidget.size_hint = (0.7, 1)
-		self.annotationPanelWidget = AnnotationPanelWidget()
+		self.annotationPanelWidget = AnnotationPanelWidget(videoEventDispatcher)
 		self.annotationPanelWidget.size_hint = (0.3, 1)
 		self.add_widget(self.videoWidget)
 		self.add_widget(self.annotationPanelWidget)
