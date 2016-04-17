@@ -71,9 +71,6 @@ class AnnotationPanelWidget(ScrollView):
 		self.layout.bind(minimum_height=self.layout.setter('height'))
 
 		self.add_widget(self.layout)
-
-		#for i in range(50):
-		#	self.addAnnotationItem('dog')
 		
 
 	def addAnnotationItem(self, category):
@@ -136,6 +133,7 @@ class VideoWidget(BoxLayout):
 	def unscheduleClocks(self):
 		Clock.unschedule(self.scheduleUpdateFrameControl)
 		Clock.unschedule(self.scheduleUpdateSlider)
+		Clock.unschedule(self.scheduleUpdateAnnotationCanvas)
 
 	def handleOnVideoLoad(self, obj, *args):
 		selectedFile = args[0]
@@ -194,7 +192,6 @@ class VideoWidget(BoxLayout):
 		self.controlWidget.frameControl.text = val
 
 	def scheduleUpdateFrameControl(self, obj):
-		#print("Schedule updating frame control")
 		if self.controlWidget.frameControl.disabled:
 			return
 		val = str(self._positionToFrame(self.videoCanvasWidget.frameWidget.position))
@@ -208,7 +205,7 @@ class VideoWidget(BoxLayout):
 	def scheduleUpdateAnnotationCanvas(self, obj):
 		self.videoCanvasWidget.canvasWidget.curFrame = \
 		self._positionToFrame(self.videoCanvasWidget.frameWidget.position)		
-		#self.videoCanvasWidget.canvasWidget.redrawCanvasAtFrame()
+		self.videoCanvasWidget.canvasWidget.redrawCanvasAtFrame()
 
 	def seekToSliderPosition(self):
 		normValue = self.slider.value_normalized
@@ -314,10 +311,19 @@ class AnnotationCanvasWidget(Widget):
 		# Interpolator
 		self.interpolator = Interpolator(self.annotationManager)
 
-
 		# Important: we must receive the current frame number from
 		# the videoWidget. This happens during
 		self.curFrame = 0
+
+		# Interaction mode:
+		# (1) Create bounding box
+		# (2) Move bounding box
+		# (3) Resize bounding box
+		self.mode = MODE_CREATE
+
+		# This is the annotation currently being interacted with
+		# This is used in MODE_MOVE and MODE_RESIZE
+		self.interactingAnnotation = None
 
 
 	def on_touch_down(self, touch):
@@ -327,34 +333,63 @@ class AnnotationCanvasWidget(Widget):
 		self.lastTouch = Touch(touch.x, touch.y)
 		self.mouseDown = True
 
+		# Compute mode for use in further interactions
+		# If touch point fully within any existing bounding box, then
+		# switch to MODE_MOVE
+		containingAnnotation = self.getContainingAnnotation(touch)
+		if containingAnnotation:
+			self.interactingAnnotation = containingAnnotation
+			self.mode = MODE_MOVE
+
 	def on_touch_move(self, touch):
 		if self.mouseDown is False:
 			return
 		self.redrawCanvasAtFrame()
 
-		with self.canvas:
-			Color(1, 0, 0)
-			self.drawRect(self.lastTouch, touch)
+		if self.mode == MODE_MOVE:
+			with self.canvas:
+				Color(1, 0, 0)
+				# Redraw everything except the interacting annotation
+				self.redrawCanvasAtFrame(excludeAnnotation=self.interactingAnnotation)
+				# Render the interacting annotation separately
+				point1 = Touch(self.interactingAnnotation.x1+touch.x-self.lastTouch.x, 
+					self.interactingAnnotation.y1+touch.y-self.lastTouch.y)
+				point2 = Touch(self.interactingAnnotation.x2+touch.x-self.lastTouch.x, 
+					self.interactingAnnotation.y2+touch.y-self.lastTouch.y)
+				self.drawRect(point1, point2)
+
+		elif self.mode == MODE_CREATE:
+			with self.canvas:
+				Color(1, 0, 0)
+				self.drawRect(self.lastTouch, touch)
 
 	def on_touch_up(self, touch):
 		if self.mouseDown is False:
 			return
 		self.redrawCanvasAtFrame()
 		
-		self.point1 = Touch(self.lastTouch.x, self.lastTouch.y)
-		self.point2 = Touch(touch.x, touch.y)
-		self.mouseDown = False
+		if self.mode == MODE_CREATE:
 
-		# Don't add annotation if rectangle is very tiny
-		if math.sqrt(math.pow(self.point1.x - self.point2.x, 2) + 
-			math.pow(self.point1.y - self.point2.y, 2)) < 10:
-			return
+			self.point1 = Touch(self.lastTouch.x, self.lastTouch.y)
+			self.point2 = Touch(touch.x, touch.y)
+			self.mouseDown = False
 
-		self.labelerPopup = Popup(title='Enter Class Label',
-			content=AnnotationLabelPopup(self.videoEventDispatcher),
-			size_hint=(None, None), size=(500, 300))
+			# Don't add annotation if rectangle is very tiny
+			if math.sqrt(math.pow(self.point1.x - self.point2.x, 2) + 
+				math.pow(self.point1.y - self.point2.y, 2)) < 10:
+				return
 
-		self.labelerPopup.open()
+			self.labelerPopup = Popup(title='Enter Class Label',
+				content=AnnotationLabelPopup(self.videoEventDispatcher),
+				size_hint=(None, None), size=(500, 300))
+
+			self.labelerPopup.open()
+
+		self.mode = MODE_CREATE
+
+	def getContainingAnnotation(self, touch):
+		annotation = self.interpolator.getContainingAnnotation(touch, self.curFrame)
+		return annotation
 
 	def handleOnLabelCreate(self, obj, *args):
 		self.labelerPopup.dismiss()
@@ -368,6 +403,7 @@ class AnnotationCanvasWidget(Widget):
 			self.point1, self.point2, classLabel)
 		self.point1 = Touch(-1, -1)
 		self.point2 = Touch(-1, -1)
+		self.redrawCanvasAtFrame()
 
 
 	def drawRect(self, point1, point2):
@@ -375,11 +411,23 @@ class AnnotationCanvasWidget(Widget):
 
 	# TODO: This function will draw all existing ractangles (annotations)
 	# for the current frame
-	def redrawCanvasAtFrame(self, *args):
+	def redrawCanvasAtFrame(self, excludeAnnotation=None):
 		self.canvas.clear()
 		print("redrawing")
 		# Get all annotations and interpolate as necessary
+		annotationsForFrame = self.interpolator.getAnnotationsForFrame(self.curFrame)
 
+		if excludeAnnotation:
+			annotationsForFrame.remove(excludeAnnotation)
+
+		with self.canvas:
+			for annotation in annotationsForFrame:
+				self.drawBoundingBox(annotation)
+
+	def drawBoundingBox(self, annotation):
+		point1 = Touch(annotation.x1, annotation.y1)
+		point2 = Touch(annotation.x2, annotation.y2)
+		Line(points=[point1.x, point1.y, point2.x, point1.y, point2.x, point2.y, point1.x, point2.y, point1.x, point1.y], width=4)
 
 class AnnotationLabelPopup(BoxLayout):
 	def __init__(self, videoEventDispatcher, **kwargs):

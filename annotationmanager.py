@@ -35,17 +35,18 @@ class AnnotationManager:
 		}
 		"""
 
-	def getAnnotationDict(self, frame):
+	def getAnnotationDict(self):
 		return self.annotationDict
+
 
 	# Function to add a new instance of any category. This will not
 	# create a new keyframe annotation
 	def addAnnotationAtFrame(self, frame, point1, point2, classLabel):
-		annotation = Annotation(point1.x, point1.y, point2.x, point2.y, classLabel)
 		
 		# Get second level dict of {id : [Annotation(frame), ...]}
 		idFrameDict = self.annotationDict.get(classLabel)
 		if not idFrameDict:
+			annotation = Annotation(point1.x, point1.y, point2.x, point2.y, classLabel, 1)
 			idFrameDict = {1 : {frame : annotation}}
 			self.annotationDict[classLabel] = idFrameDict
 		else:
@@ -54,6 +55,7 @@ class AnnotationManager:
 			newId = idsForCategory[0]
 			while newId in idsForCategory:
 				newId += 1
+			annotation = Annotation(point1.x, point1.y, point2.x, point2.y, classLabel, newId)
 			frameDict = {frame : annotation}
 			self.annotationDict[classLabel][newId] = frameDict
 
@@ -61,8 +63,10 @@ class AnnotationManager:
 
 
 class Annotation:
-	def __init__(self, x1, y1, x2, y2, category):
+	def __init__(self, x1, y1, x2, y2, category, idx):
 		self.x1 = x1
 		self.y1 = y1
 		self.x2 = x2
 		self.y2 = y2
+		self.category = category
+		self.id = idx
