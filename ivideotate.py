@@ -3,10 +3,11 @@ import cv2
 import kivy
 kivy.require('1.9.1')
 from kivy.app import App
-from kivy.graphics import Color
+from kivy.graphics import Color, Ellipse
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.anchorlayout import AnchorLayout
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.widget import Widget
 from kivy.uix.button import Button
 from kivy.uix.image import Image, AsyncImage
@@ -15,6 +16,10 @@ from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 from kivy.uix.filechooser import FileChooserIconView
 from kivy.uix.popup import Popup
+from kivy.uix.dropdown import DropDown
+from kivy.uix.label import Label
+from kivy.uix.scrollview import ScrollView
+from kivy.effects.dampedscroll import DampedScrollEffect
 from kivy.clock import Clock
 
 from filechooserwindow import FileChooserWindow
@@ -22,11 +27,66 @@ from videoeventdispatcher import VideoEventDispatcher
 from videoformats import formats
 from constants import *
 
+class AnnotationItemWidget(BoxLayout):
+	def __init__(self, **kwargs):
+		super(AnnotationItemWidget, self).__init__(**kwargs)
+		self.size_hint = (1, None)
+		self.size = (100, 80)
+		self.padding = 10
+		self.spacing = 5
+		self.category = "<category>"
+		self.id = "<id>"
+		self.label = Label(text="%s %s" % (self.category, self.id))
+		self.label.size_hint = (None, 1)
+		self.label.size = (150, 100)
+		self.add_widget(self.label)
+		self.deleteButton = Button(text="Delete")
+		self.deleteButton.size_hint = (None, 1)
+		self.deleteButton.size = (150, 100)
+		self.add_widget(self.deleteButton)
 
-class AnnotationPanelWidget(BoxLayout):
+	def setCategory(self, category):
+		self.category = category
+
+	def setId(self, inputId):
+		self.id = inputId
+
+	def refreshLabel(self):
+		self.label.text = "%s %s" % (self.category, self.id)
+
+
+class AnnotationPanelWidget(ScrollView):
 	def __init__(self, **kwargs):
 		super(AnnotationPanelWidget, self).__init__(**kwargs)
-		self.orientation = 'vertical'
+		self.do_scroll_x = False
+		self.effect_cls = DampedScrollEffect
+
+		self.layout = GridLayout(cols=1, spacing=10, size_hint_y=None)
+		self.layout.bind(minimum_height=self.layout.setter('height'))
+
+		self.add_widget(self.layout)
+
+		for i in range(50):
+			self.addAnnotationItem('dog')
+		
+
+	def addAnnotationItem(self, category):
+		annotationItemWidget = AnnotationItemWidget()
+		annotationItemWidget.setCategory(category)
+
+		# Find an available ID
+		itemWidgetIdsForCategory = [itemWidget.id for itemWidget in self.layout.children 
+			if itemWidget.category == category]
+
+		newId = 1
+		if len(itemWidgetIdsForCategory) > 0:
+			while str(newId) in itemWidgetIdsForCategory:
+				newId += 1
+
+		annotationItemWidget.setId(str(newId))
+		annotationItemWidget.refreshLabel()
+		self.layout.add_widget(annotationItemWidget)
+		return annotationItemWidget
 
 class VideoWidget(BoxLayout):
 	def __init__(self, **kwargs):
@@ -38,8 +98,7 @@ class VideoWidget(BoxLayout):
 		self.videoEventDispatcher.bind(on_pause=self.handleOnPause)
 
 		self.orientation = 'vertical'
-		canvasImagePath = PROJECT_DIR + 'canvas.jpg'
-		self.frameWidget = Video(source=canvasImagePath)
+		self.frameWidget = Video(source=CANVAS_IMAGE_PATH)
 
 		self.add_widget(self.frameWidget)
 
@@ -197,6 +256,24 @@ class ControlWidget(BoxLayout):
 			self.playing = True
 
 
+class AnnotationCanvasWidget(Widget):
+	def __init__(self, **kwargs):
+		super(AnnotationCanvasWidget, self).__init__(**kwargs)
+	def on_touch_down(self, touch):
+		print("TOUCH DOWN!!!")
+		with self.canvas:
+			d = 30
+			Ellipse(pos=(touch.x-d/2, touch.y-d/2), size=(d,d))
+
+
+class VideoDrawingWidget(FloatLayout):
+	def __init__(self, **kwargs):
+		super(VideoDrawingWidget, self).__init__(**kwargs)
+
+		self.videoWidget = VideoWidget()
+		self.canvasWidget = AnnotationCanvasWidget()
+		self.add_widget(self.videoWidget)
+		self.add_widget(self.canvasWidget)
 
 
 class RootWidget(BoxLayout):
@@ -204,10 +281,9 @@ class RootWidget(BoxLayout):
 		super(RootWidget, self).__init__(**kwargs)
 		self.videoWidget = VideoWidget()
 		self.videoWidget.size_hint = (0.7, 1)
+
 		self.annotationPanelWidget = AnnotationPanelWidget()
 		self.annotationPanelWidget.size_hint = (0.3, 1)
-		print(self.annotationPanelWidget.canvas)
-		self.annotationPanelWidget.canvas.add(Color(1, 1, 1))
 		self.add_widget(self.videoWidget)
 		self.add_widget(self.annotationPanelWidget)
 
