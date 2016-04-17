@@ -205,7 +205,12 @@ class VideoWidget(BoxLayout):
 	def scheduleUpdateAnnotationCanvas(self, obj):
 		self.videoCanvasWidget.canvasWidget.curFrame = \
 		self._positionToFrame(self.videoCanvasWidget.frameWidget.position)		
-		self.videoCanvasWidget.canvasWidget.redrawCanvasAtFrame()
+		
+
+
+		# IMPORTANT...PUT BACK
+
+		#self.videoCanvasWidget.canvasWidget.redrawCanvasAtFrame()
 
 	def seekToSliderPosition(self):
 		normValue = self.slider.value_normalized
@@ -364,11 +369,27 @@ class AnnotationCanvasWidget(Widget):
 				self.drawRect(self.lastTouch, touch)
 
 	def on_touch_up(self, touch):
+
 		if self.mouseDown is False:
 			return
 		self.redrawCanvasAtFrame()
 		
-		if self.mode == MODE_CREATE:
+		if self.mode == MODE_MOVE:
+			self.point1 = Touch(self.interactingAnnotation.x1+touch.x-self.lastTouch.x, 
+					self.interactingAnnotation.y1+touch.y-self.lastTouch.y)
+			self.point2 = Touch(self.interactingAnnotation.x2+touch.x-self.lastTouch.x, 
+					self.interactingAnnotation.y2+touch.y-self.lastTouch.y)
+			
+			print("Updating annotation with new coordinates : " )
+			print(str(self.point1.x) + ", " + str(self.point1.y) + ", " + str(self.point2.x) + ", " + str(self.point2.y))
+			self.annotationManager.updateAnnotationAtFrame(self.interactingAnnotation, 
+				self.curFrame, self.point1, self.point2)
+			self.point1 = Touch(-1, -1)
+			self.point2 = Touch(-1, -1)
+			
+			self.redrawCanvasAtFrame()
+
+		elif self.mode == MODE_CREATE:
 
 			self.point1 = Touch(self.lastTouch.x, self.lastTouch.y)
 			self.point2 = Touch(touch.x, touch.y)
@@ -409,11 +430,8 @@ class AnnotationCanvasWidget(Widget):
 	def drawRect(self, point1, point2):
 		Line(points=[point1.x, point1.y, point2.x, point1.y, point2.x, point2.y, point1.x, point2.y, point1.x, point1.y], width=4)
 
-	# TODO: This function will draw all existing ractangles (annotations)
-	# for the current frame
 	def redrawCanvasAtFrame(self, excludeAnnotation=None):
 		self.canvas.clear()
-		print("redrawing")
 		# Get all annotations and interpolate as necessary
 		annotationsForFrame = self.interpolator.getAnnotationsForFrame(self.curFrame)
 

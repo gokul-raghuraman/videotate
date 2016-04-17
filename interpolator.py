@@ -7,6 +7,9 @@ class Interpolator:
 
 		annotationDict = self.annotationManager.getAnnotationDict()
 
+		print("GETTING INTERPOLATOR'S VERSION OF THE DICT : " ) 
+		print(annotationDict)
+
 		annotations = []
 		print("INSIDE INTERPOLATOR, WORKING FOR FRAME : " + str(curFrame))
 		for category in annotationDict:
@@ -19,20 +22,23 @@ class Interpolator:
 				nextFrame = None
 				for frame in sorted(frameAnnotationDict.keys()):
 					print("Looking at frame : " + str(frame))
-					print("frame = " + str(frame))
-					print("curFrame = " + str(curFrame))
+					#print("frame = " + str(frame))
+					#print("curFrame = " + str(curFrame))
 					if frame <= curFrame:
-						print("Frame is less than or equal, or prevFrame is None")
+						print("Frame is less than or equal to curFrame...")
 						prevFrame = frame
 					if frame > curFrame:
+						print("Frame is greater than curFrame...will assign and break")
 						nextFrame = frame
 						break
 
 				# Now we have a few cases
 				if prevFrame == curFrame:
+					print("Now prevFrame equals curFrame!")
 					# We don't have to compute anything, 
 					# just return the annotation as is
 					annotation = frameAnnotationDict[prevFrame]
+					print("This is the annotation we want : " + str(annotation.x1) + ", " + str(annotation.y1) + ", " + str(annotation.x2) + ", " + str(annotation.y2))
 					annotations.append(annotation)
 
 				else:
