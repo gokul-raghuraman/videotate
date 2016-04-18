@@ -181,6 +181,7 @@ class AnnotationPanelWidget(ScrollView):
 						self.handleOnAnnotationUpdate(None, annotation, frame)
 					else:
 						self.handleOnAnnotationAdd(None, annotation, frame)
+						firstFrameAdded = True
 		return
 
 class VideoWidget(BoxLayout):
@@ -237,6 +238,8 @@ class VideoWidget(BoxLayout):
 		self.enableButtons()
 		self.enableSlider()
 
+		print("TOTAL NUM FRAMES = " + str(self._positionToFrame(self.videoCanvasWidget.frameWidget.duration)))
+
 	def handleOnPlay(self, obj, *args):
 		self.videoCanvasWidget.frameWidget.state = 'play'
 		self.scheduleClocks()
@@ -244,6 +247,7 @@ class VideoWidget(BoxLayout):
 	def handleOnPause(self, obj, *args):
 		self.videoCanvasWidget.frameWidget.state = 'pause'
 		self.unscheduleClocks()
+		print("TOTAL NUM FRAMES = " + str(self._positionToFrame(self.videoCanvasWidget.frameWidget.duration)))
 
 	def handleSliderPressed(self, obj, *args):
 		# Pause the video
@@ -266,13 +270,16 @@ class VideoWidget(BoxLayout):
 		self.updateFrameControl()
 		self.updateAnnotationCanvas()
 
+
 	def handleOnFrameControlUpdate(self, obj, *args):
-		print("Frame control updated!!!!!!!")
-		print(args)
 		frameToSeek = args[0]
+		self.unscheduleClocks()
 		self.updateSliderToFrame(frameToSeek)
-		self.seekToSliderPosition()
-		self.updateAnnotationCanvas()
+		self.seekToFrame(frameToSeek)
+
+		# Forces an update to specified frame. Use with caution
+		self.forceUpdateAnnotationCanvas(frameToSeek)
+
 
 	def handleSliderReleased(self, obj, *args):
 		# Resume the video
@@ -282,7 +289,10 @@ class VideoWidget(BoxLayout):
 		if self._videoPausedBySliderTouch:
 			self.videoCanvasWidget.frameWidget.state = 'play'
 			self._videoPausedBySliderTouch = False
-		self.scheduleClocks()
+			self.scheduleClocks()
+		else:
+			self.unscheduleClocks()
+
 
 	def enablePlayButton(self):
 		self.controlWidget.playPauseButton.disabled = False
@@ -310,6 +320,10 @@ class VideoWidget(BoxLayout):
 		val = str(self._positionToFrame(self.videoCanvasWidget.frameWidget.position))
 		self.controlWidget.frameControl.text = val
 
+	def forceUpdateAnnotationCanvas(self, frame):
+		self.videoCanvasWidget.canvasWidget.curFrame = frame
+		self.videoCanvasWidget.canvasWidget.redrawCanvasAtFrame()
+
 	def updateAnnotationCanvas(self):
 		self.videoCanvasWidget.canvasWidget.curFrame = \
 		self._positionToFrame(self.videoCanvasWidget.frameWidget.position)
@@ -322,6 +336,11 @@ class VideoWidget(BoxLayout):
 
 	def seekToSliderPosition(self):
 		normValue = self.slider.value_normalized
+		self.videoCanvasWidget.frameWidget.seek(normValue)
+
+	def seekToFrame(self, frame):
+		totalNumFrames = self._positionToFrame(self.videoCanvasWidget.frameWidget.duration)
+		normValue = float(frame) / float(totalNumFrames)
 		self.videoCanvasWidget.frameWidget.seek(normValue)
 
 	def scheduleUpdateSlider(self, obj):
@@ -492,6 +511,9 @@ class AnnotationCanvasWidget(Widget):
 		# This is used in MODE_MOVE and MODE_RESIZE
 		self.interactingAnnotation = None
 
+		# Used for MODE_RESIZE
+		self.interactingCornerIdx = None
+
 
 	def on_touch_down(self, touch):
 		# Don't consider if dragged over slider
@@ -507,6 +529,15 @@ class AnnotationCanvasWidget(Widget):
 		if containingAnnotation:
 			self.interactingAnnotation = containingAnnotation
 			self.mode = MODE_MOVE
+
+		(corneringAnnotation, cornerIdx) = self.getCorneringAnnotationAndCorner(touch)
+		if corneringAnnotation:
+			self.interactingAnnotation = corneringAnnotation
+			self.interactingCornerIdx = cornerIdx
+			self.mode = MODE_RESIZE
+			print("RESIZE MODE!!!!")
+
+
 
 	def on_touch_move(self, touch):
 		if self.mouseDown is False:
@@ -548,10 +579,16 @@ class AnnotationCanvasWidget(Widget):
 				self.curFrame, self.point1, self.point2)
 			
 			self.videoEventDispatcher.dispatchOnAnnotationUpdate(self.interactingAnnotation, self.curFrame)
-
+			self.interactingAnnotation = None
 			self.point1 = Touch(-1, -1)
 			self.point2 = Touch(-1, -1)
 			
+			self.redrawCanvasAtFrame()
+
+		elif self.mode == MODE_RESIZE:
+			#TODO: COMPLETE
+			self.interactingAnnotation = None
+			self.interactingCornerIdx = None
 			self.redrawCanvasAtFrame()
 
 		elif self.mode == MODE_CREATE:
@@ -579,6 +616,10 @@ class AnnotationCanvasWidget(Widget):
 	def getContainingAnnotation(self, touch):
 		annotation = self.interpolator.getContainingAnnotation(touch, self.curFrame)
 		return annotation
+
+	def getCorneringAnnotationAndCorner(self, touch):
+		(annotation, cornerIdx) = self.interpolator.getCorneringAnnotationAndCorner(touch, self.curFrame)
+		return (annotation, cornerIdx)
 
 	def handleOnLabelCreate(self, obj, *args):
 		self.labelerPopup.dismiss()
@@ -618,6 +659,9 @@ class AnnotationCanvasWidget(Widget):
 		self.canvas.clear()
 		# Get all annotations and interpolate as necessary
 		annotationsForFrame = self.interpolator.getAnnotationsForFrame(self.curFrame)
+
+
+		#print("REDRAWING CANVAS FOR FRAME : " + str(self.curFrame))
 
 		# We want to exclude rendering the existing annotation when the
 		# user tries to move/resize it.
@@ -664,15 +708,13 @@ class AnnotationLabelPopup(BoxLayout):
 	def handleCreate(self, obj):
 		if not self.labelInput.text:
 			return
-
 		self.videoEventDispatcher.dispatchOnLabelCreate(self.labelInput.text)
+
 
 class VideoCanvasWidget(FloatLayout):
 	def __init__(self, videoEventDispatcher, **kwargs):
 		super(VideoCanvasWidget, self).__init__(**kwargs)
-
 		self.videoEventDispatcher = videoEventDispatcher
-
 		self.frameWidget = Video(source=CANVAS_IMAGE_PATH)
 		self.canvasWidget = AnnotationCanvasWidget(self.videoEventDispatcher)
 		self.add_widget(self.frameWidget)

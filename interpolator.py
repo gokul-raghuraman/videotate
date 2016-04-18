@@ -1,3 +1,4 @@
+import math
 from annotationmanager import Annotation
 
 class Interpolator:
@@ -65,6 +66,8 @@ class Interpolator:
 				/ (nextFrame - prevFrame))
 		return curFrameVal
 
+	# Detects and returns the first annotation that fully
+	# Contains the specified point
 	def getContainingAnnotation(self, point, frame):
 		annotationsForFrame = self.getAnnotationsForFrame(frame)
 
@@ -79,5 +82,32 @@ class Interpolator:
 					if point.y < y1 or point.y < y2:
 						if point.y > y2 or point.y > y1:
 							return annotation
+
+	# Detects and returns the first annotation whose
+	# corner (any of four) is very close to specified point
+	# Also returns the corner indexed in (intended) clockwise
+	# order (0, 1, 2, 3) starting from (intended) top-left.
+	def getCorneringAnnotationAndCorner(self, point, frame):
+		annotationsForFrame = self.getAnnotationsForFrame(frame)
+		distThreshold = 10
+		for annotation in annotationsForFrame:
+			x1 = annotation.x1
+			x2 = annotation.x2
+			y1 = annotation.y1
+			y2 = annotation.y2
+
+			corners = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+			for i in range(len(corners)):
+				corner = corners[i]
+				distToPoint = self.getDistBetweenPoints(corner, (point.x, point.y))
+				if distToPoint < distThreshold:
+					return (annotation, i)
+		return (None, None)
+
+
+
+	def getDistBetweenPoints(self, point1, point2):
+		return math.sqrt(math.pow(point1[0] - point2[0], 2) + math.pow(point1[1] - point2[1], 2))
+
 
 
