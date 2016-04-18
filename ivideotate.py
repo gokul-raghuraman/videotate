@@ -535,8 +535,6 @@ class AnnotationCanvasWidget(Widget):
 			self.interactingAnnotation = corneringAnnotation
 			self.interactingCornerIdx = cornerIdx
 			self.mode = MODE_RESIZE
-			print("RESIZE MODE!!!!")
-
 
 
 	def on_touch_move(self, touch):
@@ -546,10 +544,10 @@ class AnnotationCanvasWidget(Widget):
 
 		if self.mode == MODE_MOVE:
 			with self.canvas:
-				#Color(1, 0, 0)
-				#Color(*self.interactingAnnotation.color)
+				
 				# Redraw everything except the interacting annotation
 				self.redrawCanvasAtFrame(excludeAnnotation=self.interactingAnnotation)
+				
 				# Render the interacting annotation separately
 				point1 = Touch(self.interactingAnnotation.x1+touch.x-self.lastTouch.x, 
 					self.interactingAnnotation.y1+touch.y-self.lastTouch.y)
@@ -558,10 +556,34 @@ class AnnotationCanvasWidget(Widget):
 				Color(*self.interactingAnnotation.color)
 				self.drawRect(point1, point2)
 
+		elif self.mode == MODE_RESIZE:
+			with self.canvas:
+
+				# Redraw everything except the interacting annotation
+				self.redrawCanvasAtFrame(excludeAnnotation=self.interactingAnnotation)
+
+				# Render the interacting annotation separately
+				topLeft = Touch(self.interactingAnnotation.x1, self.interactingAnnotation.y1)
+				bottomRight = Touch(self.interactingAnnotation.x2, self.interactingAnnotation.y2)
+
+				if self.interactingCornerIdx == 0:
+					topLeft = Touch(touch.x, touch.y)
+				elif self.interactingCornerIdx == 1:
+					bottomRight = Touch(touch.x, bottomRight.y)
+					topLeft = Touch(topLeft.x, touch.y)
+				elif self.interactingCornerIdx == 2:
+					bottomRight = Touch(touch.x, touch.y)
+				elif self.interactingCornerIdx == 3:
+					topLeft = Touch(touch.x, topLeft.y)
+					bottomRight = Touch(bottomRight.x, touch.y)
+			
+				Color(*self.interactingAnnotation.color)
+				self.drawRect(topLeft, bottomRight)
+
+
 		elif self.mode == MODE_CREATE:
 			with self.canvas:
 				Color(1, 0, 0)
-				#Color(random(), random(), random())
 				self.drawRect(self.lastTouch, touch)
 
 	def on_touch_up(self, touch):
@@ -587,8 +609,34 @@ class AnnotationCanvasWidget(Widget):
 
 		elif self.mode == MODE_RESIZE:
 			#TODO: COMPLETE
+
+			print("RESIZE MODE!!!!")
+			print(self.interactingAnnotation)
+			print(self.interactingCornerIdx)
+
+			topLeft = Touch(self.interactingAnnotation.x1, self.interactingAnnotation.y1)
+			bottomRight = Touch(self.interactingAnnotation.x2, self.interactingAnnotation.y2)
+
+			if self.interactingCornerIdx == 0:
+				topLeft = Touch(touch.x, touch.y)
+			elif self.interactingCornerIdx == 1:
+				bottomRight = Touch(touch.x, bottomRight.y)
+				topLeft = Touch(topLeft.x, touch.y)
+			elif self.interactingCornerIdx == 2:
+				bottomRight = Touch(touch.x, touch.y)
+			elif self.interactingCornerIdx == 3:
+				topLeft = Touch(touch.x, topLeft.y)
+				bottomRight = Touch(bottomRight.x, touch.y)
+
+			self.point1 = topLeft
+			self.point2 = bottomRight
+			self.annotationManager.updateAnnotationAtFrame(self.interactingAnnotation, 
+				self.curFrame, self.point1, self.point2)
+
 			self.interactingAnnotation = None
 			self.interactingCornerIdx = None
+			self.point1 = Touch(-1, -1)
+			self.point2 = Touch(-1, -1)
 			self.redrawCanvasAtFrame()
 
 		elif self.mode == MODE_CREATE:
@@ -640,6 +688,7 @@ class AnnotationCanvasWidget(Widget):
 	def handleOnAnnotationDelete(self, obj, category, idx):
 		# Actually delete the annotation using annotation manager
 		self.annotationManager.deleteAnnotation(category, idx)
+		self.redrawCanvasAtFrame()
 
 	def handleOnRequestLoadAnnotations(self, obj, *args):
 		print("On request load")
