@@ -2,21 +2,17 @@ from functools import partial
 from random import random
 import math
 import cv2
+
 import kivy
 kivy.require('1.9.1')
 from kivy.config import Config
 from kivy.core.window import Window
 from kivy.app import App
-from kivy.graphics import Color, Ellipse
-from kivy.graphics.vertex_instructions import Line, Rectangle
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.gridlayout import GridLayout
-from kivy.uix.widget import Widget
 from kivy.uix.button import Button
 from kivy.uix.image import Image, AsyncImage
-from kivy.uix.video import Video
 from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 from kivy.uix.filechooser import FileChooserIconView
@@ -27,9 +23,10 @@ from kivy.uix.scrollview import ScrollView
 from kivy.effects.dampedscroll import DampedScrollEffect
 from kivy.clock import Clock
 
+from videocanvaswidget import VideoCanvasWidget
 from filechooserwindow import FileChooserWindow
 from videoeventdispatcher import VideoEventDispatcher
-from annotationmanager import AnnotationManager
+from annotationmanager import AnnotationManager, Annotation
 from interpolator import Interpolator
 from videoformats import formats
 from constants import *
@@ -45,6 +42,7 @@ class AnnotationItemWidget(BoxLayout):
 		self.topWidget = AnnotationItemWidgetTop()
 		self.topWidget.size_hint = (1, 0.5)
 		self.topWidget.deleteButton.bind(on_release=self.handleDeleteButtonPressed)
+		self.topWidget.deleteKeyButton.bind(on_release=self.handleDeleteKeyButtonPressed)
 		self.bottomWidget = AnnotationItemWidgetBottom(key)
 		self.bottomWidget.size_hint = (1, 0.5)
 		self.add_widget(self.topWidget)
@@ -53,6 +51,13 @@ class AnnotationItemWidget(BoxLayout):
 	def addKey(self, key):
 		self.bottomWidget.addKey(key)
 		self.refreshLabels()
+
+	def removeKey(self, key):
+		self.bottomWidget.removeKey(key)
+		self.refreshLabels()
+
+	def getKeys(self):
+		return self.bottomWidget.keys
 
 	def setCategory(self, category):
 		self.topWidget.category = category
@@ -69,6 +74,12 @@ class AnnotationItemWidget(BoxLayout):
 		deleteId = int(self.topWidget.id)
 		self.videoEventDispatcher.dispatchOnItemDelete(deleteCategory, deleteId)
 
+	def handleDeleteKeyButtonPressed(self, obj):
+		deleteCategory = self.topWidget.category
+		deleteId = int(self.topWidget.id)
+		keys = [key for key in self.bottomWidget.keys]
+		self.videoEventDispatcher.dispatchOnKeyDeleteRequest(deleteCategory, deleteId, keys)
+
 class AnnotationItemWidgetBottom(BoxLayout):
 	def __init__(self, key, **kwargs):
 		super(AnnotationItemWidgetBottom, self).__init__(**kwargs)
@@ -79,6 +90,7 @@ class AnnotationItemWidgetBottom(BoxLayout):
 		self.keysLabel = Label(text="Keys: %s" % (', '.join([str(key) for key in self.keys])))
 		self.keysLabel.size = (500, 100)
 		self.keysLabel.text_size = self.keysLabel.width, None
+		self.keysLabel.font_size = 15
 		self.keysLabel.height = self.keysLabel.texture_size[1]
 		self.add_widget(self.keysLabel)
 
@@ -86,6 +98,10 @@ class AnnotationItemWidgetBottom(BoxLayout):
 		if key in self.keys:
 			return
 		self.keys.append(key)
+		self.keys = sorted(self.keys)
+
+	def removeKey(self, key):
+		self.keys.remove(key)
 		self.keys = sorted(self.keys)
 
 class AnnotationItemWidgetTop(BoxLayout):
@@ -101,7 +117,11 @@ class AnnotationItemWidgetTop(BoxLayout):
 		self.label.size_hint = (None, 1)
 		self.label.size = (250, 150)
 		self.add_widget(self.label)
-		self.deleteButton = Button(text="Delete")
+		self.deleteKeyButton = Button(text="Delete Key")
+		self.deleteKeyButton.size_hint = (None, 1)
+		self.deleteKeyButton.size = (150, 150)
+		self.add_widget(self.deleteKeyButton)
+		self.deleteButton = Button(text="Delete All")
 		self.deleteButton.size_hint = (None, 1)
 		self.deleteButton.size = (150, 150)
 		self.add_widget(self.deleteButton)
@@ -118,13 +138,14 @@ class AnnotationPanelWidget(ScrollView):
 		self.videoEventDispatcher.bind(on_annotation_update=self.handleOnAnnotationUpdate)
 		self.videoEventDispatcher.bind(on_item_delete=self.handleOnItemDelete)
 		self.videoEventDispatcher.bind(on_load_annotations=self.handleOnLoadAnnotations)
+		self.videoEventDispatcher.bind(on_key_delete=self.handleOnKeyDelete)
 
 		self.layout = GridLayout(cols=1, spacing=50, size_hint_x=1, size_hint_y=None)
 		self.layout.size = (100, 200)
+		self.layout.padding = 10
 		self.layout.bind(minimum_height=self.layout.setter('height'))
 
 		self.add_widget(self.layout)
-		
 
 	def addAnnotationItem(self, annotation, frame):
 		annotationItemWidget = AnnotationItemWidget(frame, self.videoEventDispatcher)
@@ -133,6 +154,13 @@ class AnnotationPanelWidget(ScrollView):
 		annotationItemWidget.refreshLabels()
 		self.layout.add_widget(annotationItemWidget)
 		return annotationItemWidget
+
+	def findItemWidgetForAnnotation(self, annotation):
+		annotationItemWidgets = self.layout.children
+		for itemWidget in annotationItemWidgets:
+			if str(itemWidget.topWidget.category) == str(annotation.category) \
+				and str(itemWidget.topWidget.id) == str(annotation.id):
+				return itemWidget
 
 	def handleOnAnnotationAdd(self, obj, *args):
 		addedAnnotation = args[0]
@@ -150,18 +178,6 @@ class AnnotationPanelWidget(ScrollView):
 				itemDeleted = True
 		if itemDeleted:
 			self.videoEventDispatcher.dispatchOnAnnotationDelete(deleteCategory, deleteId)
-
-
-	def findItemWidgetForAnnotation(self, annotation):
-		print("FINDING ITEM WIDGET")
-		print("This annotation: " + str(annotation.category) + str(annotation.id))
-		annotationItemWidgets = self.layout.children
-		for itemWidget in annotationItemWidgets:
-			print("Looking at itemwidget: " + str(itemWidget.topWidget.category) + str(itemWidget.topWidget.id))
-			if str(itemWidget.topWidget.category) == str(annotation.category) \
-				and str(itemWidget.topWidget.id) == str(annotation.id):
-				print("Returning widget")
-				return itemWidget
 
 	def handleOnAnnotationUpdate(self, obj, *args):
 		updatedAnnotation = args[0]
@@ -183,6 +199,14 @@ class AnnotationPanelWidget(ScrollView):
 						self.handleOnAnnotationAdd(None, annotation, frame)
 						firstFrameAdded = True
 		return
+
+	def handleOnKeyDelete(self, obj, category, idx, frame):
+		placeHolderAnnotation = Annotation(-1, -1, -1, -1, category, idx)
+		widgetItemToUpdate = self.findItemWidgetForAnnotation(placeHolderAnnotation)
+		widgetItemToUpdate.removeKey(frame)
+		if len(widgetItemToUpdate.getKeys()) == 0:
+			self.layout.remove_widget(widgetItemToUpdate)
+
 
 class VideoWidget(BoxLayout):
 	def __init__(self, videoEventDispatcher, **kwargs):
@@ -218,27 +242,22 @@ class VideoWidget(BoxLayout):
 		self.scheduleClocks()
 
 	def scheduleClocks(self):
-		print("Clocks scheduled")
 		Clock.schedule_interval(self.scheduleUpdateFrameControl, 0.03)
 		Clock.schedule_interval(self.scheduleUpdateSlider, 0.03)
 		Clock.schedule_interval(self.scheduleUpdateAnnotationCanvas, 0.03)
 
 	def unscheduleClocks(self):
-		print("Clocks unscheduled")
 		Clock.unschedule(self.scheduleUpdateFrameControl)
 		Clock.unschedule(self.scheduleUpdateSlider)
 		Clock.unschedule(self.scheduleUpdateAnnotationCanvas)
 
 	def handleOnVideoLoad(self, obj, *args):
 		selectedFile = args[0]
-
 		self.videoCanvasWidget.frameWidget.source = selectedFile
 		self.enablePlayButton()
 		self.enableFrameControl()
 		self.enableButtons()
 		self.enableSlider()
-
-		print("TOTAL NUM FRAMES = " + str(self._positionToFrame(self.videoCanvasWidget.frameWidget.duration)))
 
 	def handleOnPlay(self, obj, *args):
 		self.videoCanvasWidget.frameWidget.state = 'play'
@@ -247,14 +266,12 @@ class VideoWidget(BoxLayout):
 	def handleOnPause(self, obj, *args):
 		self.videoCanvasWidget.frameWidget.state = 'pause'
 		self.unscheduleClocks()
-		print("TOTAL NUM FRAMES = " + str(self._positionToFrame(self.videoCanvasWidget.frameWidget.duration)))
 
 	def handleSliderPressed(self, obj, *args):
 		# Pause the video
 		pos = args[0].pos
 		if pos[1] > slider_y_max or pos[1] < slider_y_min:
 			return
-		print("slider pressed")
 		if self.videoCanvasWidget.frameWidget.state == 'play':
 			self.videoCanvasWidget.frameWidget.state = 'pause'
 			self._videoPausedBySliderTouch = True
@@ -265,11 +282,9 @@ class VideoWidget(BoxLayout):
 		pos = args[0].pos
 		if pos[1] > slider_y_max or pos[1] < slider_y_min:
 			return
-
 		self.seekToSliderPosition()
 		self.updateFrameControl()
 		self.updateAnnotationCanvas()
-
 
 	def handleOnFrameControlUpdate(self, obj, *args):
 		frameToSeek = args[0]
@@ -279,7 +294,6 @@ class VideoWidget(BoxLayout):
 
 		# Forces an update to specified frame. Use with caution
 		self.forceUpdateAnnotationCanvas(frameToSeek)
-
 
 	def handleSliderReleased(self, obj, *args):
 		# Resume the video
@@ -292,7 +306,6 @@ class VideoWidget(BoxLayout):
 			self.scheduleClocks()
 		else:
 			self.unscheduleClocks()
-
 
 	def enablePlayButton(self):
 		self.controlWidget.playPauseButton.disabled = False
@@ -410,7 +423,6 @@ class ControlWidget(BoxLayout):
 		self.saveAnnotationsButton.disabled = True
 		self.saveAnnotationsButton.bind(on_release=self.saveAnnotations)
 
-
 		self.add_widget(self.playPauseButton)
 		self.add_widget(self.frameControl)
 		self.add_widget(self.loadVideoButton)
@@ -463,313 +475,6 @@ class ControlWidget(BoxLayout):
 		self.videoEventDispatcher.dispatchOnFrameControlUpdate(newFrame)
 
 
-
-		
-
-# Helper
-class Touch:
-	def __init__(self, x, y):
-		self.x = x
-		self.y = y
-
-class AnnotationCanvasWidget(Widget):
-	def __init__(self, videoEventDispatcher, **kwargs):
-		super(AnnotationCanvasWidget, self).__init__(**kwargs)
-
-		self.videoEventDispatcher = videoEventDispatcher
-		self.videoEventDispatcher.bind(on_label_create=self.handleOnLabelCreate)
-		self.videoEventDispatcher.bind(on_annotation_delete=self.handleOnAnnotationDelete)
-		self.videoEventDispatcher.bind(on_request_load_annotations=self.handleOnRequestLoadAnnotations)
-		self.videoEventDispatcher.bind(on_request_save_annotations=self.handleOnRequestSaveAnnotations)
-
-		# Last touch point for anchoring current bounding box 
-		# during mouse drag
-		self.lastTouch = Touch(-1, -1)
-		self.mouseDown = False
-
-		# Active points for registering newly created bounding box
-		self.point1 = Touch(-1, -1)
-		self.point2 = Touch(-1, -1)
-
-		# Annotation Manager
-		self.annotationManager = AnnotationManager()
-
-		# Interpolator
-		self.interpolator = Interpolator(self.annotationManager)
-
-		# Important: we must receive the current frame number from
-		# the videoWidget. This happens during
-		self.curFrame = 0
-
-		# Interaction mode:
-		# (1) Create bounding box
-		# (2) Move bounding box
-		# (3) Resize bounding box
-		self.mode = MODE_CREATE
-
-		# This is the annotation currently being interacted with
-		# This is used in MODE_MOVE and MODE_RESIZE
-		self.interactingAnnotation = None
-
-		# Used for MODE_RESIZE
-		self.interactingCornerIdx = None
-
-
-	def on_touch_down(self, touch):
-		# Don't consider if dragged over slider
-		if touch.y < slider_y_max:
-			return
-		self.lastTouch = Touch(touch.x, touch.y)
-		self.mouseDown = True
-
-		# Compute mode for use in further interactions
-		# If touch point fully within any existing bounding box, then
-		# switch to MODE_MOVE
-		containingAnnotation = self.getContainingAnnotation(touch)
-		if containingAnnotation:
-			self.interactingAnnotation = containingAnnotation
-			self.mode = MODE_MOVE
-
-		(corneringAnnotation, cornerIdx) = self.getCorneringAnnotationAndCorner(touch)
-		if corneringAnnotation:
-			self.interactingAnnotation = corneringAnnotation
-			self.interactingCornerIdx = cornerIdx
-			self.mode = MODE_RESIZE
-
-
-	def on_touch_move(self, touch):
-		if self.mouseDown is False:
-			return
-		self.redrawCanvasAtFrame()
-
-		if self.mode == MODE_MOVE:
-			with self.canvas:
-				
-				# Redraw everything except the interacting annotation
-				self.redrawCanvasAtFrame(excludeAnnotation=self.interactingAnnotation)
-				
-				# Render the interacting annotation separately
-				point1 = Touch(self.interactingAnnotation.x1+touch.x-self.lastTouch.x, 
-					self.interactingAnnotation.y1+touch.y-self.lastTouch.y)
-				point2 = Touch(self.interactingAnnotation.x2+touch.x-self.lastTouch.x, 
-					self.interactingAnnotation.y2+touch.y-self.lastTouch.y)
-				Color(*self.interactingAnnotation.color)
-				self.drawRect(point1, point2)
-
-		elif self.mode == MODE_RESIZE:
-			with self.canvas:
-
-				# Redraw everything except the interacting annotation
-				self.redrawCanvasAtFrame(excludeAnnotation=self.interactingAnnotation)
-
-				# Render the interacting annotation separately
-				topLeft = Touch(self.interactingAnnotation.x1, self.interactingAnnotation.y1)
-				bottomRight = Touch(self.interactingAnnotation.x2, self.interactingAnnotation.y2)
-
-				if self.interactingCornerIdx == 0:
-					topLeft = Touch(touch.x, touch.y)
-				elif self.interactingCornerIdx == 1:
-					bottomRight = Touch(touch.x, bottomRight.y)
-					topLeft = Touch(topLeft.x, touch.y)
-				elif self.interactingCornerIdx == 2:
-					bottomRight = Touch(touch.x, touch.y)
-				elif self.interactingCornerIdx == 3:
-					topLeft = Touch(touch.x, topLeft.y)
-					bottomRight = Touch(bottomRight.x, touch.y)
-			
-				Color(*self.interactingAnnotation.color)
-				self.drawRect(topLeft, bottomRight)
-
-
-		elif self.mode == MODE_CREATE:
-			with self.canvas:
-				Color(1, 0, 0)
-				self.drawRect(self.lastTouch, touch)
-
-	def on_touch_up(self, touch):
-
-		if self.mouseDown is False:
-			return
-		self.redrawCanvasAtFrame()
-		
-		if self.mode == MODE_MOVE:
-			self.point1 = Touch(self.interactingAnnotation.x1+touch.x-self.lastTouch.x, 
-					self.interactingAnnotation.y1+touch.y-self.lastTouch.y)
-			self.point2 = Touch(self.interactingAnnotation.x2+touch.x-self.lastTouch.x, 
-					self.interactingAnnotation.y2+touch.y-self.lastTouch.y)
-			self.annotationManager.updateAnnotationAtFrame(self.interactingAnnotation, 
-				self.curFrame, self.point1, self.point2)
-			
-			self.videoEventDispatcher.dispatchOnAnnotationUpdate(self.interactingAnnotation, self.curFrame)
-			self.interactingAnnotation = None
-			self.point1 = Touch(-1, -1)
-			self.point2 = Touch(-1, -1)
-			
-			self.redrawCanvasAtFrame()
-
-		elif self.mode == MODE_RESIZE:
-			#TODO: COMPLETE
-
-			print("RESIZE MODE!!!!")
-			print(self.interactingAnnotation)
-			print(self.interactingCornerIdx)
-
-			topLeft = Touch(self.interactingAnnotation.x1, self.interactingAnnotation.y1)
-			bottomRight = Touch(self.interactingAnnotation.x2, self.interactingAnnotation.y2)
-
-			if self.interactingCornerIdx == 0:
-				topLeft = Touch(touch.x, touch.y)
-			elif self.interactingCornerIdx == 1:
-				bottomRight = Touch(touch.x, bottomRight.y)
-				topLeft = Touch(topLeft.x, touch.y)
-			elif self.interactingCornerIdx == 2:
-				bottomRight = Touch(touch.x, touch.y)
-			elif self.interactingCornerIdx == 3:
-				topLeft = Touch(touch.x, topLeft.y)
-				bottomRight = Touch(bottomRight.x, touch.y)
-
-			self.point1 = topLeft
-			self.point2 = bottomRight
-			self.annotationManager.updateAnnotationAtFrame(self.interactingAnnotation, 
-				self.curFrame, self.point1, self.point2)
-
-			self.interactingAnnotation = None
-			self.interactingCornerIdx = None
-			self.point1 = Touch(-1, -1)
-			self.point2 = Touch(-1, -1)
-			self.redrawCanvasAtFrame()
-
-		elif self.mode == MODE_CREATE:
-			self.point1 = Touch(self.lastTouch.x, self.lastTouch.y)
-			self.point2 = Touch(touch.x, touch.y)
-			self.mouseDown = False
-
-			# Don't add annotation if released over slider
-			if touch.y < slider_y_max:
-				return
-
-			# Or if rectangle is very tiny
-			if math.sqrt(math.pow(self.point1.x - self.point2.x, 2) + 
-				math.pow(self.point1.y - self.point2.y, 2)) < 10:
-				return
-
-			self.labelerPopup = Popup(title='Enter Class Label',
-				content=AnnotationLabelPopup(self.videoEventDispatcher),
-				size_hint=(None, None), size=(500, 300))
-
-			self.labelerPopup.open()
-
-		self.mode = MODE_CREATE
-
-	def getContainingAnnotation(self, touch):
-		annotation = self.interpolator.getContainingAnnotation(touch, self.curFrame)
-		return annotation
-
-	def getCorneringAnnotationAndCorner(self, touch):
-		(annotation, cornerIdx) = self.interpolator.getCorneringAnnotationAndCorner(touch, self.curFrame)
-		return (annotation, cornerIdx)
-
-	def handleOnLabelCreate(self, obj, *args):
-		self.labelerPopup.dismiss()
-
-		if -1 in [self.point1.x, self.point1.y, self.point2.x, self.point2.y]:
-			print("Invalid bounding box!")
-			return
-		classLabel = args[0]
-
-		addedAnnotation = self.annotationManager.addAnnotationAtFrame(self.curFrame, 
-			self.point1, self.point2, classLabel)
-		self.point1 = Touch(-1, -1)
-		self.point2 = Touch(-1, -1)
-		self.redrawCanvasAtFrame()
-
-		self.videoEventDispatcher.dispatchOnAnnotationAdd(addedAnnotation, self.curFrame)
-
-	def handleOnAnnotationDelete(self, obj, category, idx):
-		# Actually delete the annotation using annotation manager
-		self.annotationManager.deleteAnnotation(category, idx)
-		self.redrawCanvasAtFrame()
-
-	def handleOnRequestLoadAnnotations(self, obj, *args):
-		print("On request load")
-		fileName = args[0]
-		self.annotationManager.loadAnnotations(fileName)
-		self.redrawCanvasAtFrame()
-		self.videoEventDispatcher.dispatchOnLoadAnnotations(self.annotationManager.annotationDict)
-
-	def handleOnRequestSaveAnnotations(self, obj, *args):
-		fileName = args[0]
-		self.annotationManager.saveAnnotations(fileName)
-
-	def drawRect(self, point1, point2):
-		Line(points=[point1.x, point1.y, point2.x, point1.y, point2.x, point2.y, point1.x, point2.y, point1.x, point1.y], width=4)
-
-	def redrawCanvasAtFrame(self, excludeAnnotation=None):
-		self.canvas.clear()
-		# Get all annotations and interpolate as necessary
-		annotationsForFrame = self.interpolator.getAnnotationsForFrame(self.curFrame)
-
-
-		#print("REDRAWING CANVAS FOR FRAME : " + str(self.curFrame))
-
-		# We want to exclude rendering the existing annotation when the
-		# user tries to move/resize it.
-		# Important: we can't directly reference the excludeAnnotation
-		# object for removal because getContainingAnnotation will 
-		# create a new object for in-between frames. So compare category
-		# and id for removal
-		if excludeAnnotation:
-			for annotation in annotationsForFrame:
-				if annotation.category == excludeAnnotation.category and annotation.id == excludeAnnotation.id:
-					annotationsForFrame.remove(annotation)
-					break
-
-		with self.canvas:
-			for annotation in annotationsForFrame:
-				Color(*annotation.color)
-				self.drawBoundingBox(annotation)
-
-	def drawBoundingBox(self, annotation):
-		point1 = Touch(annotation.x1, annotation.y1)
-		point2 = Touch(annotation.x2, annotation.y2)
-		Line(points=[point1.x, point1.y, point2.x, point1.y, point2.x, point2.y, point1.x, point2.y, point1.x, point1.y], width=4)
-
-class AnnotationLabelPopup(BoxLayout):
-	def __init__(self, videoEventDispatcher, **kwargs):
-		super(AnnotationLabelPopup, self).__init__(**kwargs)
-		self.videoEventDispatcher = videoEventDispatcher
-
-		self.orientation = 'vertical'
-		self.spacing = 10
-		self.padding = 10
-		self.labelInput = TextInput(text='')
-		self.labelInput.multiline = False
-		self.labelInput.size_hint = (1, None)
-		self.labelInput.size = (100, 60)
-		self.createButton = Button(text='Create')
-		self.createButton.size_hint = (None, None)
-		self.createButton.size = (100, 60)
-		self.createButton.bind(on_release=self.handleCreate)
-		
-		self.add_widget(self.labelInput)
-		self.add_widget(self.createButton)
-
-	def handleCreate(self, obj):
-		if not self.labelInput.text:
-			return
-		self.videoEventDispatcher.dispatchOnLabelCreate(self.labelInput.text)
-
-
-class VideoCanvasWidget(FloatLayout):
-	def __init__(self, videoEventDispatcher, **kwargs):
-		super(VideoCanvasWidget, self).__init__(**kwargs)
-		self.videoEventDispatcher = videoEventDispatcher
-		self.frameWidget = Video(source=CANVAS_IMAGE_PATH)
-		self.canvasWidget = AnnotationCanvasWidget(self.videoEventDispatcher)
-		self.add_widget(self.frameWidget)
-		self.add_widget(self.canvasWidget)
-
-
 class RootWidget(BoxLayout):
 	def __init__(self, **kwargs):
 		super(RootWidget, self).__init__(**kwargs)
@@ -781,15 +486,12 @@ class RootWidget(BoxLayout):
 		self.add_widget(self.videoWidget)
 		self.add_widget(self.annotationPanelWidget)
 
-class IVideotate(App):
 
+class IVideotate(App):
 	def build(self):
 		parent = RootWidget()
 		return parent
 
 if __name__ == '__main__':
-
 	Window.size = (1000, 800)
-
 	IVideotate().run()
-

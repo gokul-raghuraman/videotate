@@ -1,6 +1,8 @@
 import math
 from annotationmanager import Annotation
 
+
+# Class for computing interpolations and other geometric helpers
 class Interpolator:
 	def __init__(self, annotationManager):
 		self.annotationManager = annotationManager
@@ -104,10 +106,6 @@ class Interpolator:
 					return (annotation, i)
 		return (None, None)
 
-
-
 	def getDistBetweenPoints(self, point1, point2):
 		return math.sqrt(math.pow(point1[0] - point2[0], 2) + math.pow(point1[1] - point2[1], 2))
-
-
 

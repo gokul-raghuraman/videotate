@@ -8,6 +8,8 @@ class AnnotationManager:
 	def __init__(self):
 		self.annotationDict = {}
 		"""
+		Here's what this dict looks like:
+
 		{
 			'<category1>' : {	
 								<id1>  :  {
@@ -68,11 +70,6 @@ class AnnotationManager:
 
 	def updateAnnotationAtFrame(self, annotation, frame, point1, point2):
 
-		print("GOING TO UPDATE ANNOTATION AT FRAME : " + str(frame))
-		print(frame.__class__)
-		print(annotation.id.__class__)
-		print(self.annotationDict)
-
 		# Find the annotation framedict (there should be one)
 		idFrameDict = self.annotationDict[annotation.category]
 		frameDict = idFrameDict[annotation.id]
@@ -88,7 +85,6 @@ class AnnotationManager:
 		
 		# If not, create a new annotation for this frame
 		else: 
-			print("UPDATING NEW ANNOT")
 			color = frameDict[frameDict.keys()[0]].color
 			frameDict[frame] = Annotation(point1.x, point1.y, point2.x, point2.y, annotation.category, annotation.id, color=color)
 			idFrameDict[annotation.id] = frameDict
@@ -97,13 +93,22 @@ class AnnotationManager:
 		return
 
 	def deleteAnnotation(self, category, idx):
-		print("Before deleting annotation, dict is : " + str(self.annotationDict))
 		idFrameDict = self.annotationDict[category]
 		idFrameDict.pop(idx)
 		if not idFrameDict:
 			self.annotationDict.pop(category)
+		return
 
-		print("After deleting annotation, dict is now : " + str(self.annotationDict))
+	def deleteAnnotationAtFrame(self, category, idx, frame):
+		idFrameDict = self.annotationDict[category]
+		frameDict = idFrameDict[idx]
+		frameDict.pop(frame)
+		if not frameDict:
+			idFrameDict.pop(idx)
+			if not idFrameDict:
+				self.annotationDict.pop(category)
+			else:
+				self.annotationDict[category] = idFrameDict
 		return
 
 	def getWriteableAnnotations(self):
@@ -163,8 +168,9 @@ class Annotation:
 		self.category = category
 		self.id = idx
 
-		# Assign a random color
 		if color:
 			self.color = color
+
+		# Assign a random color if none specified
 		else:
 			self.color = (random(), random(), random())

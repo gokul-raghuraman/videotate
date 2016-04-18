@@ -1,17 +1,3 @@
-from functools import partial
-import kivy
-kivy.require('1.9.1')
-from kivy.app import App
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.anchorlayout import AnchorLayout
-from kivy.uix.widget import Widget
-from kivy.uix.button import Button
-from kivy.uix.image import Image, AsyncImage
-from kivy.uix.slider import Slider
-from kivy.uix.textinput import TextInput
-from kivy.uix.filechooser import FileChooserIconView
-from kivy.uix.popup import Popup
 from kivy.event import EventDispatcher
 
 class VideoEventDispatcher(EventDispatcher):
@@ -30,6 +16,8 @@ class VideoEventDispatcher(EventDispatcher):
 		self.register_event_type('on_request_save_annotations')
 		self.register_event_type('on_load_annotations')
 		self.register_event_type('on_frame_control_update')
+		self.register_event_type('on_key_delete_request')
+		self.register_event_type('on_key_delete')
 		super(VideoEventDispatcher, self).__init__(**kwargs)
 
 	def dispatchOnVideoLoad(self, value):
@@ -74,6 +62,12 @@ class VideoEventDispatcher(EventDispatcher):
 	def dispatchOnFrameControlUpdate(self, value):
 		self.dispatch('on_frame_control_update', value)
 
+	def dispatchOnKeyDeleteRequest(self, value1, value2, value3):
+		self.dispatch('on_key_delete_request', value1, value2, value3)
+
+	def dispatchOnKeyDelete(self, value1, value2, value3):
+		self.dispatch('on_key_delete', value1, value2, value3)
+
 	def on_video_load(self, *args):
 		print("Video Loaded")
 
@@ -115,3 +109,9 @@ class VideoEventDispatcher(EventDispatcher):
 
 	def on_frame_control_update(self, *args):
 		print("Frame Control Updated")
+
+	def on_key_delete_request(self, *args):
+		print("Key Delete Requested")
+
+	def on_key_delete(self, *args):
+		print("Key Deleted:")
