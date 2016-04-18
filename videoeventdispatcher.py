@@ -23,6 +23,9 @@ class VideoEventDispatcher(EventDispatcher):
 		self.register_event_type('on_label_create')
 		self.register_event_type('on_popup_cancelled')
 		self.register_event_type('on_annotation_add')
+		self.register_event_type('on_annotation_update')
+		self.register_event_type('on_item_delete')
+		self.register_event_type('on_annotation_delete')
 		super(VideoEventDispatcher, self).__init__(**kwargs)
 
 	def dispatchOnVideoLoad(self, value):
@@ -43,8 +46,17 @@ class VideoEventDispatcher(EventDispatcher):
 	def dispatchOnPopupCancelled(self):
 		self.dispatch('on_popup_cancelled')
 
-	def dispatchOnAnnotationAdd(self, value):
-		self.dispatch('on_annotation_add', value)
+	def dispatchOnAnnotationAdd(self, value1, value2):
+		self.dispatch('on_annotation_add', value1, value2)
+
+	def dispatchOnAnnotationUpdate(self, value1, value2):
+		self.dispatch('on_annotation_update', value1, value2)
+
+	def dispatchOnItemDelete(self, value1, value2):
+		self.dispatch('on_item_delete', value1, value2)
+
+	def dispatchOnAnnotationDelete(self, value1, value2):
+		self.dispatch('on_annotation_delete', value1, value2)
 
 	def on_video_load(self, *args):
 		print("Video Loaded")
@@ -65,4 +77,13 @@ class VideoEventDispatcher(EventDispatcher):
 		print("Popup Cancelled")
 
 	def on_annotation_add(self, *args):
-		print("Annotated Added")
+		print("Annotation Added")
+
+	def on_annotation_update(self, *args):
+		print("Annotation Updated")
+
+	def on_item_delete(self, *args):
+		print("Item Deleted")
+
+	def on_annotation_delete(self, *args):
+		print("Annotated Deleted")

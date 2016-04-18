@@ -33,34 +33,79 @@ from interpolator import Interpolator
 from videoformats import formats
 from constants import *
 
+
 class AnnotationItemWidget(BoxLayout):
-	def __init__(self, **kwargs):
+	def __init__(self, key, videoEventDispatcher, **kwargs):
 		super(AnnotationItemWidget, self).__init__(**kwargs)
+		self.orientation = 'vertical'
 		self.size_hint = (1, None)
-		self.size = (100, 80)
+		self.size = (100, 100)
+		self.videoEventDispatcher = videoEventDispatcher
+		self.topWidget = AnnotationItemWidgetTop()
+		self.topWidget.size_hint = (1, 0.5)
+		self.topWidget.deleteButton.bind(on_release=self.handleDeleteButtonPressed)
+		self.bottomWidget = AnnotationItemWidgetBottom(key)
+		self.bottomWidget.size_hint = (1, 0.5)
+		self.add_widget(self.topWidget)
+		self.add_widget(self.bottomWidget)
+
+	def addKey(self, key):
+		self.bottomWidget.addKey(key)
+		self.refreshLabels()
+
+	def setCategory(self, category):
+		self.topWidget.category = category
+
+	def setId(self, inputId):
+		self.topWidget.id = inputId
+
+	def refreshLabels(self):
+		self.topWidget.label.text = "%s %s" % (self.topWidget.category, self.topWidget.id)
+		self.bottomWidget.keysLabel.text = "Keys: %s" % (', '.join([str(key) for key in self.bottomWidget.keys]))
+
+	def handleDeleteButtonPressed(self, obj):
+		deleteCategory = self.topWidget.category
+		deleteId = int(self.topWidget.id)
+		self.videoEventDispatcher.dispatchOnItemDelete(deleteCategory, deleteId)
+
+class AnnotationItemWidgetBottom(BoxLayout):
+	def __init__(self, key, **kwargs):
+		super(AnnotationItemWidgetBottom, self).__init__(**kwargs)
+		self.size_hint = (1, 1)
+		#self.size = (100, 120)
+		#self.orientation = 'vertical'
 		self.padding = 10
 		self.spacing = 5
+		self.keys = [key]
+		self.keysLabel = Label(text="Keys: %s" % (', '.join([str(key) for key in self.keys])))
+		#self.keysLabel.size_hint = (None, 1)
+		#self.keysLabel.size_hint_y = None
+		#self.keysLabel.size = (500, 100)
+		#self.keysLabel.text_size = self.keysLabel.width, None
+		#self.keysLabel.height = self.keysLabel.texture_size[1]
+		self.add_widget(self.keysLabel)
+
+	def addKey(self, key):
+		self.keys.append(key)
+		self.keys = sorted(self.keys)
+
+class AnnotationItemWidgetTop(BoxLayout):
+	def __init__(self, **kwargs):
+		super(AnnotationItemWidgetTop, self).__init__(**kwargs)
+		#self.size_hint = (1, None)
+		#self.size = (100, 120)
+		self.padding = 5
+		self.spacing = 10
 		self.category = "<category>"
 		self.id = "<id>"
 		self.label = Label(text="[b]%s %s[/b]" % (self.category, self.id))
 		self.label.size_hint = (None, 1)
-		self.label.size = (250, 100)
+		self.label.size = (250, 150)
 		self.add_widget(self.label)
 		self.deleteButton = Button(text="Delete")
 		self.deleteButton.size_hint = (None, 1)
-		self.deleteButton.size = (150, 100)
+		self.deleteButton.size = (150, 150)
 		self.add_widget(self.deleteButton)
-
-		self.deleteButton.size_hint = (1, 1)
-
-	def setCategory(self, category):
-		self.category = category
-
-	def setId(self, inputId):
-		self.id = inputId
-
-	def refreshLabel(self):
-		self.label.text = "%s %s" % (self.category, self.id)
 
 
 class AnnotationPanelWidget(ScrollView):
@@ -71,25 +116,58 @@ class AnnotationPanelWidget(ScrollView):
 
 		self.videoEventDispatcher = videoEventDispatcher
 		self.videoEventDispatcher.bind(on_annotation_add=self.handleOnAnnotationAdd)
+		self.videoEventDispatcher.bind(on_annotation_update=self.handleOnAnnotationUpdate)
+		self.videoEventDispatcher.bind(on_item_delete=self.handleOnItemDelete)
 
-		self.layout = GridLayout(cols=1, spacing=10, size_hint_y=None)
+		self.layout = GridLayout(cols=1, spacing=50, size_hint_x=1, size_hint_y=None)
+		self.layout.size = (100, 200)
 		self.layout.bind(minimum_height=self.layout.setter('height'))
 
 		self.add_widget(self.layout)
 		
 
-	def addAnnotationItem(self, annotation):
-		annotationItemWidget = AnnotationItemWidget()
+	def addAnnotationItem(self, annotation, frame):
+		annotationItemWidget = AnnotationItemWidget(frame, self.videoEventDispatcher)
 		annotationItemWidget.setCategory(annotation.category)
 		annotationItemWidget.setId(str(annotation.id))
-		annotationItemWidget.refreshLabel()
+		annotationItemWidget.refreshLabels()
 		self.layout.add_widget(annotationItemWidget)
 		return annotationItemWidget
 
 	def handleOnAnnotationAdd(self, obj, *args):
 		addedAnnotation = args[0]
-		addedItemWidget = self.addAnnotationItem(addedAnnotation)
+		addedFrame = args[1]
+		addedItemWidget = self.addAnnotationItem(addedAnnotation, addedFrame)
 
+	def handleOnItemDelete(self, obj, *args):
+		deleteCategory = args[0]
+		deleteId = args[1]
+		itemDeleted = False
+		for itemWidget in self.layout.children:
+			if str(itemWidget.topWidget.category) == str(deleteCategory) \
+				and str(itemWidget.topWidget.id) == str(deleteId):
+				self.layout.remove_widget(itemWidget)
+				itemDeleted = True
+		if itemDeleted:
+			self.videoEventDispatcher.dispatchOnAnnotationDelete(deleteCategory, deleteId)
+
+
+	def findItemWidgetForAnnotation(self, annotation):
+		print("FINDING ITEM WIDGET")
+		print("This annotation: " + str(annotation.category) + str(annotation.id))
+		annotationItemWidgets = self.layout.children
+		for itemWidget in annotationItemWidgets:
+			print("Looking at itemwidget: " + str(itemWidget.topWidget.category) + str(itemWidget.topWidget.id))
+			if str(itemWidget.topWidget.category) == str(annotation.category) \
+				and str(itemWidget.topWidget.id) == str(annotation.id):
+				print("Returning widget")
+				return itemWidget
+
+	def handleOnAnnotationUpdate(self, obj, *args):
+		updatedAnnotation = args[0]
+		updatedFrame = args[1]
+		widgetItemForAnnotation = self.findItemWidgetForAnnotation(updatedAnnotation)
+		widgetItemForAnnotation.addKey(updatedFrame)
 
 class VideoWidget(BoxLayout):
 	def __init__(self, videoEventDispatcher, **kwargs):
@@ -295,6 +373,7 @@ class AnnotationCanvasWidget(Widget):
 
 		self.videoEventDispatcher = videoEventDispatcher
 		self.videoEventDispatcher.bind(on_label_create=self.handleOnLabelCreate)
+		self.videoEventDispatcher.bind(on_annotation_delete=self.handleOnAnnotationDelete)
 
 		# Last touch point for anchoring current bounding box 
 		# during mouse drag
@@ -376,6 +455,9 @@ class AnnotationCanvasWidget(Widget):
 					self.interactingAnnotation.y2+touch.y-self.lastTouch.y)
 			self.annotationManager.updateAnnotationAtFrame(self.interactingAnnotation, 
 				self.curFrame, self.point1, self.point2)
+			
+			self.videoEventDispatcher.dispatchOnAnnotationUpdate(self.interactingAnnotation, self.curFrame)
+
 			self.point1 = Touch(-1, -1)
 			self.point2 = Touch(-1, -1)
 			
@@ -421,8 +503,15 @@ class AnnotationCanvasWidget(Widget):
 		self.point2 = Touch(-1, -1)
 		self.redrawCanvasAtFrame()
 
-		self.videoEventDispatcher.dispatchOnAnnotationAdd(addedAnnotation)
+		self.videoEventDispatcher.dispatchOnAnnotationAdd(addedAnnotation, self.curFrame)
 
+	def handleOnAnnotationDelete(self, obj, category, idx):
+		# Actually delete the annotation using annotation manager
+		print("ON ANNOTATION DELETE")
+		print(category)
+		print(idx)
+		#print(idx.__class__)
+		self.annotationManager.deleteAnnotation(category, idx)
 
 	def drawRect(self, point1, point2):
 		Line(points=[point1.x, point1.y, point2.x, point1.y, point2.x, point2.y, point1.x, point2.y, point1.x, point1.y], width=4)

@@ -84,6 +84,15 @@ class AnnotationManager:
 		
 		return
 
+	def deleteAnnotation(self, category, idx):
+		print("Before deleting annotation, dict is : " + str(self.annotationDict))
+		idFrameDict = self.annotationDict[category]
+		idFrameDict.pop(idx)
+		if not idFrameDict:
+			self.annotationDict.pop(category)
+
+		print("After deleting annotation, dict is now : " + str(self.annotationDict))
+		return
 
 class Annotation:
 	def __init__(self, x1, y1, x2, y2, category, idx):
