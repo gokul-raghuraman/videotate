@@ -52,7 +52,8 @@ class Interpolator:
 						y1 = self.linInterp(prevFrame, nextFrame, curFrame, pAnnotation.y1, nAnnotation.y1)
 						x2 = self.linInterp(prevFrame, nextFrame, curFrame, pAnnotation.x2, nAnnotation.x2)
 						y2 = self.linInterp(prevFrame, nextFrame, curFrame, pAnnotation.y2, nAnnotation.y2)
-						annotation = Annotation(x1, y1, x2, y2, pAnnotation.category, pAnnotation.id)
+						color = pAnnotation.color
+						annotation = Annotation(x1, y1, x2, y2, pAnnotation.category, pAnnotation.id, color=color)
 						annotations.append(annotation)
 
 		return annotations

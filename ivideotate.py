@@ -1,4 +1,5 @@
 from functools import partial
+from random import random
 import math
 import cv2
 import kivy
@@ -72,20 +73,18 @@ class AnnotationItemWidgetBottom(BoxLayout):
 	def __init__(self, key, **kwargs):
 		super(AnnotationItemWidgetBottom, self).__init__(**kwargs)
 		self.size_hint = (1, 1)
-		#self.size = (100, 120)
-		#self.orientation = 'vertical'
 		self.padding = 10
 		self.spacing = 5
 		self.keys = [key]
 		self.keysLabel = Label(text="Keys: %s" % (', '.join([str(key) for key in self.keys])))
-		#self.keysLabel.size_hint = (None, 1)
-		#self.keysLabel.size_hint_y = None
-		#self.keysLabel.size = (500, 100)
-		#self.keysLabel.text_size = self.keysLabel.width, None
-		#self.keysLabel.height = self.keysLabel.texture_size[1]
+		self.keysLabel.size = (500, 100)
+		self.keysLabel.text_size = self.keysLabel.width, None
+		self.keysLabel.height = self.keysLabel.texture_size[1]
 		self.add_widget(self.keysLabel)
 
 	def addKey(self, key):
+		if key in self.keys:
+			return
 		self.keys.append(key)
 		self.keys = sorted(self.keys)
 
@@ -118,6 +117,7 @@ class AnnotationPanelWidget(ScrollView):
 		self.videoEventDispatcher.bind(on_annotation_add=self.handleOnAnnotationAdd)
 		self.videoEventDispatcher.bind(on_annotation_update=self.handleOnAnnotationUpdate)
 		self.videoEventDispatcher.bind(on_item_delete=self.handleOnItemDelete)
+		self.videoEventDispatcher.bind(on_load_annotations=self.handleOnLoadAnnotations)
 
 		self.layout = GridLayout(cols=1, spacing=50, size_hint_x=1, size_hint_y=None)
 		self.layout.size = (100, 200)
@@ -169,6 +169,20 @@ class AnnotationPanelWidget(ScrollView):
 		widgetItemForAnnotation = self.findItemWidgetForAnnotation(updatedAnnotation)
 		widgetItemForAnnotation.addKey(updatedFrame)
 
+	def handleOnLoadAnnotations(self, obj, annotationDict):
+		for category in annotationDict:
+			idFrameDict = annotationDict[category]
+			for idx in idFrameDict:
+				frameDict = idFrameDict[idx]
+				firstFrameAdded = False
+				for frame in frameDict:
+					annotation = frameDict[frame]
+					if firstFrameAdded:
+						self.handleOnAnnotationUpdate(None, annotation, frame)
+					else:
+						self.handleOnAnnotationAdd(None, annotation, frame)
+		return
+
 class VideoWidget(BoxLayout):
 	def __init__(self, videoEventDispatcher, **kwargs):
 		super(VideoWidget, self).__init__(**kwargs)
@@ -177,6 +191,7 @@ class VideoWidget(BoxLayout):
 		self.videoEventDispatcher.bind(on_video_load=self.handleOnVideoLoad)
 		self.videoEventDispatcher.bind(on_play=self.handleOnPlay)
 		self.videoEventDispatcher.bind(on_pause=self.handleOnPause)
+		self.videoEventDispatcher.bind(on_frame_control_update=self.handleOnFrameControlUpdate)
 
 		self.orientation = 'vertical'
 		CANVAS_IMAGE_PATH = PROJECT_DIR + 'canvas.jpg'
@@ -191,8 +206,6 @@ class VideoWidget(BoxLayout):
 		self.slider.bind(on_touch_move=self.handleSliderDragged)
 		self.slider.bind(on_touch_up=self.handleSliderReleased)
 
-		#self.slider.bind(value=self.handleSliderDragged)
-
 		self._videoPausedBySliderTouch=False
 		self.add_widget(self.slider)
 
@@ -204,11 +217,13 @@ class VideoWidget(BoxLayout):
 		self.scheduleClocks()
 
 	def scheduleClocks(self):
+		print("Clocks scheduled")
 		Clock.schedule_interval(self.scheduleUpdateFrameControl, 0.03)
 		Clock.schedule_interval(self.scheduleUpdateSlider, 0.03)
 		Clock.schedule_interval(self.scheduleUpdateAnnotationCanvas, 0.03)
 
 	def unscheduleClocks(self):
+		print("Clocks unscheduled")
 		Clock.unschedule(self.scheduleUpdateFrameControl)
 		Clock.unschedule(self.scheduleUpdateSlider)
 		Clock.unschedule(self.scheduleUpdateAnnotationCanvas)
@@ -219,6 +234,7 @@ class VideoWidget(BoxLayout):
 		self.videoCanvasWidget.frameWidget.source = selectedFile
 		self.enablePlayButton()
 		self.enableFrameControl()
+		self.enableButtons()
 		self.enableSlider()
 
 	def handleOnPlay(self, obj, *args):
@@ -231,6 +247,10 @@ class VideoWidget(BoxLayout):
 
 	def handleSliderPressed(self, obj, *args):
 		# Pause the video
+		pos = args[0].pos
+		if pos[1] > slider_y_max or pos[1] < slider_y_min:
+			return
+		print("slider pressed")
 		if self.videoCanvasWidget.frameWidget.state == 'play':
 			self.videoCanvasWidget.frameWidget.state = 'pause'
 			self._videoPausedBySliderTouch = True
@@ -239,15 +259,26 @@ class VideoWidget(BoxLayout):
 	def handleSliderDragged(self, obj, *args):
 		# Don't consider if mouse not over slider
 		pos = args[0].pos
-		if pos[1] > slider_y:
+		if pos[1] > slider_y_max or pos[1] < slider_y_min:
 			return
+
 		self.seekToSliderPosition()
 		self.updateFrameControl()
 		self.updateAnnotationCanvas()
 
+	def handleOnFrameControlUpdate(self, obj, *args):
+		print("Frame control updated!!!!!!!")
+		print(args)
+		frameToSeek = args[0]
+		self.updateSliderToFrame(frameToSeek)
+		self.seekToSliderPosition()
+		self.updateAnnotationCanvas()
+
 	def handleSliderReleased(self, obj, *args):
 		# Resume the video
-		#self.seekToSliderPosition()
+		pos = args[0].pos
+		if pos[1] > slider_y_max or pos[1] < slider_y_min:
+			return
 		if self._videoPausedBySliderTouch:
 			self.videoCanvasWidget.frameWidget.state = 'play'
 			self._videoPausedBySliderTouch = False
@@ -259,6 +290,10 @@ class VideoWidget(BoxLayout):
 	def enableFrameControl(self):
 		self.controlWidget.frameControl.disabled = False
 		self.controlWidget.frameControl.text = '0'
+
+	def enableButtons(self):
+		self.controlWidget.loadAnnotationsButton.disabled = False
+		self.controlWidget.saveAnnotationsButton.disabled = False
 
 	def enableSlider(self):
 		self.slider.disabled = False
@@ -296,9 +331,19 @@ class VideoWidget(BoxLayout):
 		videoDuration = self.videoCanvasWidget.frameWidget.duration
 		self.slider.value_normalized = videoPosition / videoDuration
 
-	# Helper
+	def updateSliderToFrame(self, frame):
+		if self.slider.disabled:
+			return
+		videoPosition = self._frameToPosition(frame)
+		videoDuration = self.videoCanvasWidget.frameWidget.duration
+		self.slider.value_normalized = videoPosition / videoDuration
+
+	# Helpers
 	def _positionToFrame(self, position):
 		return int(position * 24.0)
+
+	def _frameToPosition(self, frame):
+		return float(frame) / 24.0
 
 class ControlWidget(BoxLayout):
 
@@ -310,6 +355,7 @@ class ControlWidget(BoxLayout):
 
 		# Video playing flag. Important
 		self.playing = False
+		self.activeFile = ""
 
 		self.videoEventDispatcher = videoEventDispatcher
 		self.videoEventDispatcher.bind(on_file_selected=self.handleOnFileSelected)
@@ -326,15 +372,31 @@ class ControlWidget(BoxLayout):
 		self.frameControl.size_hint = (None, None)
 		self.frameControl.size = (120, 60)
 		self.frameControl.disabled = True
+		self.frameControl.bind(on_text_validate=self.handleFrameControlChanged)
 
 		self.loadVideoButton = Button(text='Load Video')
 		self.loadVideoButton.size_hint = (None, None)
 		self.loadVideoButton.size = (200, 60)
 		self.loadVideoButton.bind(on_release=self.openFileChooserPopup)
 
+		self.loadAnnotationsButton = Button(text='Load Annotations')
+		self.loadAnnotationsButton.size_hint = (None, None)
+		self.loadAnnotationsButton.size = (250, 60)
+		self.loadAnnotationsButton.disabled = True
+		self.loadAnnotationsButton.bind(on_release=self.loadAnnotations)
+
+		self.saveAnnotationsButton = Button(text='Save Annotations')
+		self.saveAnnotationsButton.size_hint = (None, None)
+		self.saveAnnotationsButton.size = (250, 60)
+		self.saveAnnotationsButton.disabled = True
+		self.saveAnnotationsButton.bind(on_release=self.saveAnnotations)
+
+
 		self.add_widget(self.playPauseButton)
 		self.add_widget(self.frameControl)
 		self.add_widget(self.loadVideoButton)
+		self.add_widget(self.loadAnnotationsButton)
+		self.add_widget(self.saveAnnotationsButton)
 
 		self.fileChooserPopup = Popup(title='Select Video File',
 			content=FileChooserWindow(self.videoEventDispatcher),
@@ -343,10 +405,21 @@ class ControlWidget(BoxLayout):
 	def openFileChooserPopup(self, obj):
 		self.fileChooserPopup.open()
 
+	def loadAnnotations(self, obj):
+		if not self.activeFile:
+			return
+		self.videoEventDispatcher.dispatchOnRequestLoadAnnotations(self.activeFile)
+
+	def saveAnnotations(self, obj):
+		if not self.activeFile:
+			return
+		self.videoEventDispatcher.dispatchOnRequestSaveAnnotations(self.activeFile)
+
 	def handleOnFileSelected(self, obj, *args):
 		self.fileChooserPopup.dismiss()
 		selectedFile = args[0]
 		self.videoEventDispatcher.dispatchOnVideoLoad(selectedFile)
+		self.activeFile = selectedFile
 
 	def handleOnPopupCancelled(self, obj, *args):
 		self.fileChooserPopup.dismiss()
@@ -361,6 +434,19 @@ class ControlWidget(BoxLayout):
 			self.videoEventDispatcher.dispatchOnPlay(None)
 			self.playing = True
 
+	def handleFrameControlChanged(self, obj, *args):
+		# Better way is to first check for valid input
+		newFrame = 0
+		try:
+			newFrame = int(obj.text)
+		except ValueError:
+			return
+		self.videoEventDispatcher.dispatchOnFrameControlUpdate(newFrame)
+
+
+
+		
+
 # Helper
 class Touch:
 	def __init__(self, x, y):
@@ -374,6 +460,8 @@ class AnnotationCanvasWidget(Widget):
 		self.videoEventDispatcher = videoEventDispatcher
 		self.videoEventDispatcher.bind(on_label_create=self.handleOnLabelCreate)
 		self.videoEventDispatcher.bind(on_annotation_delete=self.handleOnAnnotationDelete)
+		self.videoEventDispatcher.bind(on_request_load_annotations=self.handleOnRequestLoadAnnotations)
+		self.videoEventDispatcher.bind(on_request_save_annotations=self.handleOnRequestSaveAnnotations)
 
 		# Last touch point for anchoring current bounding box 
 		# during mouse drag
@@ -407,7 +495,7 @@ class AnnotationCanvasWidget(Widget):
 
 	def on_touch_down(self, touch):
 		# Don't consider if dragged over slider
-		if touch.y < slider_y:
+		if touch.y < slider_y_max:
 			return
 		self.lastTouch = Touch(touch.x, touch.y)
 		self.mouseDown = True
@@ -427,7 +515,8 @@ class AnnotationCanvasWidget(Widget):
 
 		if self.mode == MODE_MOVE:
 			with self.canvas:
-				Color(1, 0, 0)
+				#Color(1, 0, 0)
+				#Color(*self.interactingAnnotation.color)
 				# Redraw everything except the interacting annotation
 				self.redrawCanvasAtFrame(excludeAnnotation=self.interactingAnnotation)
 				# Render the interacting annotation separately
@@ -435,11 +524,13 @@ class AnnotationCanvasWidget(Widget):
 					self.interactingAnnotation.y1+touch.y-self.lastTouch.y)
 				point2 = Touch(self.interactingAnnotation.x2+touch.x-self.lastTouch.x, 
 					self.interactingAnnotation.y2+touch.y-self.lastTouch.y)
+				Color(*self.interactingAnnotation.color)
 				self.drawRect(point1, point2)
 
 		elif self.mode == MODE_CREATE:
 			with self.canvas:
 				Color(1, 0, 0)
+				#Color(random(), random(), random())
 				self.drawRect(self.lastTouch, touch)
 
 	def on_touch_up(self, touch):
@@ -469,7 +560,7 @@ class AnnotationCanvasWidget(Widget):
 			self.mouseDown = False
 
 			# Don't add annotation if released over slider
-			if touch.y < slider_y:
+			if touch.y < slider_y_max:
 				return
 
 			# Or if rectangle is very tiny
@@ -507,11 +598,18 @@ class AnnotationCanvasWidget(Widget):
 
 	def handleOnAnnotationDelete(self, obj, category, idx):
 		# Actually delete the annotation using annotation manager
-		print("ON ANNOTATION DELETE")
-		print(category)
-		print(idx)
-		#print(idx.__class__)
 		self.annotationManager.deleteAnnotation(category, idx)
+
+	def handleOnRequestLoadAnnotations(self, obj, *args):
+		print("On request load")
+		fileName = args[0]
+		self.annotationManager.loadAnnotations(fileName)
+		self.redrawCanvasAtFrame()
+		self.videoEventDispatcher.dispatchOnLoadAnnotations(self.annotationManager.annotationDict)
+
+	def handleOnRequestSaveAnnotations(self, obj, *args):
+		fileName = args[0]
+		self.annotationManager.saveAnnotations(fileName)
 
 	def drawRect(self, point1, point2):
 		Line(points=[point1.x, point1.y, point2.x, point1.y, point2.x, point2.y, point1.x, point2.y, point1.x, point1.y], width=4)
@@ -535,6 +633,7 @@ class AnnotationCanvasWidget(Widget):
 
 		with self.canvas:
 			for annotation in annotationsForFrame:
+				Color(*annotation.color)
 				self.drawBoundingBox(annotation)
 
 	def drawBoundingBox(self, annotation):
